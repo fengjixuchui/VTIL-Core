@@ -82,8 +82,8 @@ namespace vtil
 
 			// Simple position/validity checks.
 			//
-			bool is_end() const { return !container || operator==( { container, container->stream.end() } ); }
-			bool is_begin() const { return !container || operator==( { container, container->stream.begin() } ); }
+			bool is_end() const { return !container || ((const iterator_type&)*this)==container->stream.end(); }
+			bool is_begin() const { return !container || ((const iterator_type&)*this)==container->stream.begin(); }
 			bool is_valid() const { return !is_begin() || !is_end(); }
 
 			// Simple helper used to trace paths towards a container.
@@ -226,6 +226,24 @@ namespace vtil
 		const_iterator end() const { return { this, stream.end() }; }
 		const_iterator begin() const { return { this, stream.begin() }; }
 
+		// Drops const qualifier from iterator after asserting iterator
+		// belongs to this basic block.
+		//
+		iterator acquire( const const_iterator& it );
+
+		// Wrap std::list::erase.
+		//
+		iterator erase( const const_iterator& it );
+
+		// Wrap std::list::insert with stack state-keeping.
+		//
+		iterator insert( const const_iterator& it, instruction&& ins );
+
+		// Wrap std::list::push_back.
+		//
+		void push_back( instruction&& ins ) { ( void ) insert( end(), std::move( ins ) ); }
+		void push_back( const instruction& ins ) { ( void ) insert( end(), instruction{ ins } ); }
+
 		// Returns whether or not block is complete, a complete
 		// block ends with a branching instruction.
 		//
@@ -237,21 +255,16 @@ namespace vtil
 		static basic_block* begin( vip_t entry_vip );
 		basic_block* fork( vip_t entry_vip );
 
-		// Helpers for the allocation of unique temporary registers
+		// Helpers for the allocation of unique temporary registers.
 		//
-		register_desc tmp( uint8_t size );
+		register_desc tmp( bitcnt_t size );
 		template<typename... params>
-		auto tmp( uint8_t size_0, params... size_n )
+		auto tmp( bitcnt_t size_0, params... size_n )
 		{
 			return std::make_tuple( tmp( size_0 ), tmp( size_n )... );
 		}
 
-		// Instruction pre-processor
-		//
-		void append_instruction( instruction&& ins );
-		void append_instruction( const instruction& ins ) { append_instruction( instruction{ ins } ); }
-
-		// Lazy wrappers for every instruction
+		// Lazy wrappers for every instruction.
 		//
 		template<typename _T>
 		auto prepare_operand( _T&& value )
@@ -272,10 +285,11 @@ namespace vtil
 		template<typename... Ts>																								                \
 		basic_block* x ( Ts&&... operands )																						                \
 		{																														                \
-			append_instruction( instruction{ &ins:: x, std::vector<operand>( { prepare_operand(std::forward<Ts>(operands))... } ) } );			\
+			push_back( instruction{ &ins:: x, std::vector<operand>( { prepare_operand(std::forward<Ts>(operands))... } ) } );			\
 			return this;																										                \
 		}
 		WRAP_LAZY( mov );
+		WRAP_LAZY( movsx );
 		WRAP_LAZY( str );
 		WRAP_LAZY( ldd );
 		WRAP_LAZY( neg );
@@ -289,6 +303,7 @@ namespace vtil
 		WRAP_LAZY( imulhi );
 		WRAP_LAZY( rem );
 		WRAP_LAZY( irem );
+		WRAP_LAZY( popcnt );
 		WRAP_LAZY( bnot );
 		WRAP_LAZY( bshr );
 		WRAP_LAZY( bshl );
@@ -297,7 +312,16 @@ namespace vtil
 		WRAP_LAZY( band );
 		WRAP_LAZY( bror );
 		WRAP_LAZY( brol );
-		WRAP_LAZY( upflg );
+		WRAP_LAZY( tg );  
+		WRAP_LAZY( tge ); 
+		WRAP_LAZY( te );  
+		WRAP_LAZY( tne ); 
+		WRAP_LAZY( tle ); 
+		WRAP_LAZY( tl );  
+		WRAP_LAZY( tug ); 
+		WRAP_LAZY( tuge );
+		WRAP_LAZY( tule );
+		WRAP_LAZY( tul ); 
 		WRAP_LAZY( js );
 		WRAP_LAZY( jmp );
 		WRAP_LAZY( vexit );
@@ -312,21 +336,22 @@ namespace vtil
 
 		// Queues a stack shift.
 		//
-		basic_block* shift_sp( int64_t offset, bool merge_instance = false, iterator it = {} );
-
-		// Pushes current flags value up the stack queueing the
-		// shift in stack pointer.
-		//
-		basic_block* pushf();
+		basic_block* shift_sp( int64_t offset, bool merge_instance = false, const const_iterator& it = {} );
 
 		// Emits an entire instruction using series of VEMITs.
 		//
 		basic_block* vemits( const std::string& assembly );
 
+		// Pushes/pops current flags value up the stack queueing 
+		// the shift in stack pointer.
+		//
+		basic_block* pushf() { return push( REG_FLAGS ); }
+		basic_block* popf() { return pop( REG_FLAGS ); }
+
 		// Pushes an operand up the stack queueing the
 		// shift in stack pointer.
 		//
-		template<typename T, uint8_t stack_alignment = 2>
+		template<typename T, size_t stack_alignment = 2>
 		basic_block* push( const T& _op )
 		{
 			operand op = prepare_operand( _op );
@@ -340,7 +365,20 @@ namespace vtil
 				return mov( t0, op )->push( t0 );
 			}
 
-			shift_sp( op.size() < stack_alignment ? -stack_alignment : -int64_t( op.size() ) );
+			// If operand size is not aligned:
+			//
+			if ( size_t misalignment = op.size() % stack_alignment )
+			{
+				// Adjust for misalignment and zero the padding.
+				//
+				int64_t padding_size = stack_alignment - misalignment;
+				shift_sp( -padding_size );
+				str( REG_SP, sp_offset, operand( 0, padding_size * 8 ) );
+			}
+
+			// Shift and write the operand.
+			//
+			shift_sp( -int64_t( op.size() ) );
 			str( REG_SP, sp_offset, op );
 			return this;
 		}
@@ -348,12 +386,27 @@ namespace vtil
 		// Pops an operand from the stack queueing the
 		// shift in stack pointer.
 		//
-		template<typename T, uint8_t stack_alignment = 2>
+		template<typename T, size_t stack_alignment = 2>
 		basic_block* pop( const T& _op )
 		{
 			operand op = prepare_operand( _op );
+			
+			// Save the pre-shift offset.
+			//
 			int64_t offset = sp_offset;
-			shift_sp( op.size() < stack_alignment ? stack_alignment : op.size() );
+
+			// If operand size is not aligned:
+			//
+			if ( size_t misalignment = op.size() % stack_alignment )
+			{
+				// Adjust for misalignment.
+				//
+				shift_sp( stack_alignment - misalignment );
+			}
+
+			// Shift and read to the operand.
+			//
+			shift_sp( op.size() );
 			ldd( op, REG_SP, offset );
 			return this;
 		}

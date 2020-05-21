@@ -81,8 +81,8 @@ namespace vtil::math
         uremainder,     // 
 
         // ----------------- Special Operators ----------------- //
-        ucast,          // uintRHS_t(LHS, RHS)
-        cast,           // intRHS_t(LHS, RHS)
+        ucast,          // uintRHS_t(LHS)
+        cast,           // intRHS_t(LHS)
         popcnt,         // POPCNT(RHS)
         bit_test,       // [LHS>>RHS]&1
         mask,           // RHS.mask()
@@ -104,6 +104,8 @@ namespace vtil::math
                   
         ugreater,       // < Unsigned variants of above > [Note: equal and not_equal are always unsigned.]
         ugreater_eq,    //
+        uequal,         //
+        unot_equal,     //
         uless_eq,       //
         uless,          //
     max,
@@ -204,10 +206,12 @@ namespace vtil::math
         {    0,       false,    2,    false,          "!=",       "not_equal"   },
         {   -1,       true,     2,    false,          "<=",       "less_eq"     },
         {   -1,       true,     2,    false,          "<",        "less"        },
-        {    0,       false,    2,    false,          "u>",       "ugreater"    },
-        {    0,       false,    2,    false,          "u>=",      "ugreater_eq" },
-        {    0,       false,    2,    false,          "u<=",      "uless_eq"    },
-        {    0,       false,    2,    false,          "u<",       "uless"       },
+        {   +1,       false,    2,    false,          "u>",       "ugreater"    },
+        {   +1,       false,    2,    false,          "u>=",      "ugreater_eq" },
+        {    0,       false,    2,    false,          "u==",      "uequal"      },
+        {    0,       false,    2,    false,          "u!=",      "unot_equal"  },
+        {   +1,       false,    2,    false,          "u<=",      "uless_eq"    },
+        {   +1,       false,    2,    false,          "u<",       "uless"       },
     };
     static_assert( std::size( descriptors ) == size_t( operator_id::max ), "Operator descriptor table is invalid." );
     static const operator_desc* descriptor_of( operator_id id ) 

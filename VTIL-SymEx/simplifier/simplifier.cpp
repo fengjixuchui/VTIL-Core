@@ -33,6 +33,14 @@
 
 namespace vtil::symbolic
 {
+	struct join_depth_exception : std::exception
+	{
+		const char* what() const throw( )
+		{
+			return "Reached the maximum join depth limit.";
+		}
+	};
+
 	// Simplifier cache and its accessors.
 	//
 	static thread_local simplifier_cache_t simplifier_cache;
@@ -69,7 +77,7 @@ namespace vtil::symbolic
 		{
 			// If we can transform the expression by the directive set:
 			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst ) )
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, {}, -1 ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_PRP>( "[Pack] %s => %s\n", dir_src->to_string(), dir_dst->to_string() );
@@ -88,9 +96,12 @@ namespace vtil::symbolic
 	// Attempts to simplify the expression given, returns whether the simplification
 	// succeeded or not.
 	//
-	bool simplify_expression( expression::reference& exp, bool pretty )
+	bool simplify_expression( expression::reference& exp, bool pretty, int64_t max_depth )
 	{
 		using namespace logger;
+
+		if ( max_depth == 0 )
+			throw join_depth_exception{};
 
 		// If simplify hint is set, only call prettify if requested and return.
 		//
@@ -140,7 +151,8 @@ namespace vtil::symbolic
 
 		// Otherwise create a new cache entry with {invalid, false} by default.
 		//
-		auto& [cache_entry, success_flag] = simplifier_cache[ ( boxed_expression& ) *exp ];
+		cache_it = simplifier_cache.insert( { ( boxed_expression& ) *exp, { {}, false } } ).first;
+		auto& [cache_entry, success_flag] = cache_it->second;
 
 		// Simplify operands first if not done already.
 		//
@@ -154,7 +166,7 @@ namespace vtil::symbolic
 			// If we could simplify the operand:
 			//
 			expression::reference op_ref = *op_ptr;
-			if ( simplify_expression( op_ref, false ) )
+			if ( simplify_expression( op_ref, false, max_depth - 1 ) )
 			{
 				// Own the reference and relocate the pointer.
 				//
@@ -167,7 +179,7 @@ namespace vtil::symbolic
 
 				// Recurse, and indicate success.
 				//
-				simplify_expression( exp, pretty );
+				simplify_expression( exp, pretty, max_depth - 1 );
 				exp_new->simplify_hint = true;
 				cache_entry = *exp;
 				success_flag = true;
@@ -200,7 +212,7 @@ namespace vtil::symbolic
 		{
 			// If we can transform the expression by the directive set:
 			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst ) )
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, {}, max_depth ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_GRN>( "[Simplify] %s => %s\n", dir_src->to_string(), dir_dst->to_string() );
@@ -209,7 +221,7 @@ namespace vtil::symbolic
 
 				// Recurse, set the hint and return the simplified instance.
 				//
-				simplify_expression( exp_new, pretty );
+				simplify_expression( exp_new, pretty, max_depth );
 				( +exp_new )->simplify_hint = true;
 				cache_entry = exp_new;
 				success_flag = true;
@@ -222,19 +234,75 @@ namespace vtil::symbolic
 		//
 		for ( auto& [dir_src, dir_dst] : directive::join_descriptors )
 		{
+			// Declare the filter.
+			//
+			expression_filter_t filter;
+			
+			// If no maximum depth was set:
+			//
+			if ( max_depth < 0 )
+			{
+				filter = [ & ] ( auto& exp_new )
+				{
+					// If complexity was reduced already, pass.
+					//
+					if ( exp_new->complexity < exp->complexity )
+						return true;
+
+					// Save current cache iterator.
+					//
+					auto it0 = simplifier_cache.end();
+					
+					// Try simplifying with maximum depth set as expression's
+					// depth times two and pass if complexity was reduced.
+					//
+					try
+					{
+						simplify_expression( exp_new, false, exp_new->depth * 2 );
+						return exp_new->complexity < exp->complexity;
+					}
+					// If maximum depth was reached, revert any changes to the cache
+					// and fail the join directive.
+					//
+					catch ( join_depth_exception& )
+					{
+						simplifier_cache.erase( it0, simplifier_cache.end() );
+						return false;
+					}
+				};
+			}
+			// Else:
+			//
+			else
+			{
+				filter = [ & ] ( auto& exp_new )
+				{
+					// If complexity was reduced already, pass.
+					//
+					if ( exp_new->complexity < exp->complexity )
+						return true;
+
+					// Attempt simplifying with maximum depth decremented by one,
+					// fail if complexity was not reduced.
+					//
+					simplify_expression( exp_new, false, max_depth - 1 );
+					return exp_new->complexity < exp->complexity;
+				};
+			}
+
 			// If we can transform the expression by the directive set:
 			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst, 
-				 [ & ] ( auto& exp_new ) { return exp_new->complexity < exp->complexity; } ) )
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, filter, max_depth ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_GRN>( "[Join] %s => %s\n", dir_src->to_string(), dir_dst->to_string() );
 				log<CON_GRN>( "= %s [By join directive]\n", exp_new->to_string() );
+				log<CON_YLW>( "Complexity: %lf => %lf\n", exp->complexity, exp_new->complexity );
 #endif
 
 				// Recurse, set the hint and return the simplified instance.
 				//
-				simplify_expression( exp_new, pretty );
+				simplify_expression( exp_new, pretty, max_depth - 1 );
 				( +exp_new )->simplify_hint = true;
 				cache_entry = exp_new;
 				success_flag = true;
@@ -250,7 +318,7 @@ namespace vtil::symbolic
 			// If we can transform the expression by the directive set:
 			//
 			if ( auto exp_new = transform( exp, dir_src, dir_dst, 
-				 [ & ] ( auto& exp_new ) { return simplify_expression( exp_new, pretty ) && exp_new->complexity < exp->complexity; } ) )
+				 [ & ] ( auto& exp_new ) { return simplify_expression( exp_new, pretty, max_depth - 1 ) && exp_new->complexity < exp->complexity; }, max_depth ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_YLW>( "[Unpack] %s => %s\n", dir_src->to_string(), dir_dst->to_string() );

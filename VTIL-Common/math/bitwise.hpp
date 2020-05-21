@@ -69,8 +69,26 @@ namespace vtil::math
     //
     static constexpr uint64_t fill( bitcnt_t bit_count, bitcnt_t bit_offset = 0 )
     {
-        if ( bit_offset >= 64 ) return 0;
-        return ( ( ~0ull ) >> ( 64 - bit_count ) ) << bit_offset;
+        // Determine shift direction and magnitude.
+        // - Could have used calculated [sgn] instead of second comparison but
+        //   this makes it easier for the compiler to optimize into cmovcc.
+        //
+        bool is_shr = sgn( bit_offset );
+        bitcnt_t abs_shift = ( bit_offset >= 0 ) ? bit_offset : -bit_offset;
+
+        // Shifting beyond the variable size cause unexpected (mod) behaviour
+        // on x64, check the shift count first.
+        //
+        if ( abs_shift >= 64 ) return 0;
+
+        // Fill with [bit_count] x [1] starting from the lowest bit.
+        //
+        uint64_t abs_value = ( ~0ull ) >> ( 64 - bit_count );
+        
+        // Shift accordingly.
+        //
+        if( is_shr ) return abs_value >> abs_shift;
+        else         return abs_value << abs_shift;
     }
 
     // Fills the bits of the uint64_t type after the given offset with the sign bit.
@@ -206,7 +224,7 @@ namespace vtil::math
         // Constructs a bit-vector where bits are partially known.											                                
         //																									                                
         bit_vector( uint64_t known_bits, uint64_t unknown_bits, bitcnt_t bit_count ) :   
-            bit_count( bit_count ),     unknown_bits( unknown_bits & fill( bit_count ) ),   known_bits( known_bits & ~( unknown_bits & fill( bit_count ) ) ) {}
+            bit_count( bit_count ),     unknown_bits( unknown_bits & fill( bit_count ) ),   known_bits( known_bits & ( ~unknown_bits ) & fill( bit_count ) ) {}
 
         // Some helpers to access the internal state.
         //
@@ -285,9 +303,20 @@ namespace vtil::math
         }
 
         // Declare reduction.
+        //
+        auto reduce() { return reference_as_tuple( unknown_bits, known_bits, bit_count ); }
+
+        // TODO: Remove me.
+        //  Let modern compilers know that we use these operators as is,
+        //  implementation considering all candidates would be preferred
+        //  but since not all of our target compilers implement complete
+        //  ISO C++20, we have to go with this "patch".
+        //
         // - Note: Relative comparison operators should not be used for actual comparison 
         //         but are there for the use of sorted containers.
         //
-        auto reduce() { return reference_as_tuple( unknown_bits, known_bits, bit_count ); }
+        using reducable::operator<;
+        using reducable::operator==;
+        using reducable::operator!=;
     };
 };

@@ -69,6 +69,16 @@ namespace vtil
 			// Declare reduction.
 			//
 			auto reduce() { return reference_as_tuple( u64, bit_count ); }
+
+			// TODO: Remove me.
+			//  Let modern compilers know that we use these operators as is,
+			//  implementation considering all candidates would be preferred
+			//  but since not all of our target compilers implement complete
+			//  ISO C++20, we have to go with this "patch".
+			//
+			using reducable::operator<;
+			using reducable::operator==;
+			using reducable::operator!=;
 		};
 
 		// Descriptor of this operand.
@@ -121,8 +131,12 @@ namespace vtil
 				// Bit offset and bit count must be both byte-aligned
 				// with the exception of bit count == 1 for boolean registers.
 				//
-				return !( reg().bit_offset & 7 ) &&
-					 ( !( reg().bit_count & 7  ) || reg().bit_count == 1 );
+				if ( reg().bit_count != 1 )
+				{
+					return !( reg().bit_offset & 7 ) &&
+						   !( reg().bit_count & 7 );
+				}
+				return true;
 			}
 
 			// Otherwise must be a valid immediate.
