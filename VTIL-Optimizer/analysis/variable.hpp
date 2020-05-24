@@ -65,17 +65,7 @@ namespace vtil::optimizer
 
             // Declare reduction.
             //
-            auto reduce() { return reference_as_tuple( bit_count, *pointer ); }
-
-            // TODO: Remove me.
-            //  Let modern compilers know that we use these operators as is,
-            //  implementation considering all candidates would be preferred
-            //  but since not all of our target compilers implement complete
-            //  ISO C++20, we have to go with this "patch".
-            //
-            using reducable::operator<;
-            using reducable::operator==;
-            using reducable::operator!=;
+            REDUCE_TO( bit_count, *pointer );
         };
 
         // The iterator at which this variable is read at.
@@ -133,12 +123,12 @@ namespace vtil::optimizer
         //
         std::string to_string() const;
 
-        // Declare reduction.
-        //
-        auto reduce() { return reference_as_tuple( dereference_if( !at.is_end(), at ), at.is_valid() ? at.container->entry_vip : invalid_vip, descriptor, is_branch_dependant ); }
-
         // Packs all the variables in the expression where it'd be optimal.
         //
         static symbolic::expression pack_all( const symbolic::expression& exp );
+
+        // Declare reduction.
+        //
+        REDUCE_TO( dereference_if( !at.is_end(), at ), at.is_valid() ? at.container->entry_vip : invalid_vip, descriptor, is_branch_dependant );
     };
 };

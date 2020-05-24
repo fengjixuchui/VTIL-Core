@@ -140,7 +140,9 @@ namespace vtil::symbolic
 			case math::operator_id::rotate_left:
 				if ( rhs->is_constant() && rhs->known_one() != 0 && !signed_cast )
 				{
-					*this = ( ( lhs << rhs ).resize( new_size ) | ( lhs >> ( lhs->size() - rhs ) ).resize( new_size ) );
+					auto lhs_v = std::move( lhs );
+					auto rhs_v = std::move( rhs );
+					*this = ( ( lhs_v << rhs_v ).resize( new_size ) | ( lhs_v >> ( lhs_v->size() - rhs_v ) ).resize( new_size ) );
 				}
 				else
 				{
@@ -153,7 +155,9 @@ namespace vtil::symbolic
 			case math::operator_id::rotate_right:
 				if ( rhs->is_constant() && rhs->known_one() != 0 && !signed_cast )
 				{
-					*this = ( ( lhs >> rhs ).resize( new_size ) | ( lhs << ( lhs->size() - rhs ) ).resize( new_size ) );
+					auto lhs_v = std::move( lhs );
+					auto rhs_v = std::move( rhs );
+					*this = ( ( lhs_v >> rhs_v ).resize( new_size ) | ( lhs_v << ( lhs_v->size() - rhs_v ) ).resize( new_size ) );
 				}
 				else
 				{
@@ -256,20 +260,22 @@ namespace vtil::symbolic
 				//
 				if ( lhs->size() > rhs->get().value() )
 				{
-					*this = ( lhs & expression{ math::fill( rhs->get<bitcnt_t>().value() ), lhs->size() } ).resize( new_size );
+					auto lhs_v = std::move( lhs );
+					auto rhs_v = std::move( rhs );
+					*this = ( lhs_v & expression{ math::fill( rhs_v->get<bitcnt_t>().value() ), lhs_v->size() } ).resize( new_size );
 					break;
 				}
 				// If sizes match, escape cast operator.
 				//
 				else if ( lhs->size() == new_size )
 				{
-					*this = *lhs;
+					*this = *std::move( lhs );
 				}
 				// Otherwise upgrade the parameter.
 				//
 				else
 				{
-					rhs = new_size;
+					*+rhs = new_size;
 				}
 				break;
 
@@ -281,20 +287,22 @@ namespace vtil::symbolic
 				//
 				if ( lhs->size() > rhs->get().value() )
 				{
-					*this = ( lhs & expression{ math::fill( rhs->get<bitcnt_t>().value() ), lhs->size() } ).resize( new_size, true );
+					auto lhs_v = std::move( lhs );
+					auto rhs_v = std::move( rhs );
+					*this = ( lhs_v & expression{ math::fill( rhs_v->get<bitcnt_t>().value() ), lhs_v->size() } ).resize( new_size, true );
 					break;
 				}
 				// If sizes match, escape cast operator.
 				//
 				else if ( lhs->size() == new_size )
 				{
-					*this = *lhs;
+					*this = *std::move( lhs );
 				}
 				// Otherwise, if both are signed upgrade the parameter.
 				//
 				else if ( signed_cast )
 				{
-					rhs = new_size;
+					*+rhs = new_size;
 				}
 				// Else, convert to unsigned cast since top bits will be zero.
 				//
@@ -597,7 +605,9 @@ namespace vtil::symbolic
 		//
 		int8_t a_hint = a.is_expression() ? a.get_op_desc()->hint_bitwise : 0;
 		int8_t b_hint = b.is_expression() ? b.get_op_desc()->hint_bitwise : 0;
-		int8_t m_hint = a_hint != 0 && b_hint != 0 ? a_hint * b_hint : ( a_hint != 0 ? a_hint : b_hint );
+		int8_t m_hint = a_hint != 0 && b_hint != 0 
+			? ( a_hint == 1 && b_hint == 1 ) 
+			: ( a_hint != 0 ? a_hint : b_hint );
 
 		// If arithmetic hint, try A-B==0 first and then A^B==0.
 		//
