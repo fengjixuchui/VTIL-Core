@@ -26,56 +26,49 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <algorithm>
-#include "concept.hpp"
+#include <vtil/utility>
+#include <vtil/math>
+#include "pointer.hpp"
+#include "variable.hpp"
+#include "../arch/register_desc.hpp"
 
-namespace vtil
+namespace vtil::symbolic
 {
-	namespace impl
+	// Strictness of pointers describing what happens when the pointer could 
+	// not be resolved based on the previous write operations.
+	//
+	enum class memory_type
 	{
-		// Determines whether the object is random-accessable by definition or not.
+		// Will generate a variable of the result of dereferencing 
+		// upon default construction.
 		//
-		template<typename... D>
-		struct is_default_ra : concept_base<is_default_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], std::size( v ) );
-		};
+		free,
 
-		// Determine whether the object is random-accessable by a custom interface or not.
+		// Will generate an undefined variable upon default construction.
 		//
-		template<typename... D>
-		struct is_cutom_ra : concept_base<is_cutom_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], v.size() );
-		};
+		relaxed,
+
+		// Will throw an exception upon default construction.
+		//
+		strict
 	};
 
-	// Returns whether the given object is a random-accessable container or not.
+	// Declaration of symbolic memory type using sinkhole.
 	//
-	template<typename T>
-	static constexpr bool is_random_access_v = 
-		impl::is_default_ra<T>::apply() ||
-		impl::is_cutom_ra<T>::apply();
-
-	// Gets the size of the given container.
+	using memory = sinkhole<pointer, expression, pointer::make_weak>;
+	
+	// Creates a symbolic memory of the given type.
 	//
-	template<typename T>
-	static size_t dynamic_size( T& o )
+	static memory create_memory( memory_type type )
 	{
-		if constexpr ( impl::is_default_ra<T>::apply() )
-			return std::size( o );
-		else if constexpr ( impl::is_cutom_ra<T>::apply() )
-			return o.size();
-		return 0;
-	}
-
-	// Gets the Nth element from the object.
-	//
-	template<typename T>
-	static auto& deref_n( T& o, size_t N )
-	{
-		return o[ N ];
+		switch ( type )
+		{
+			case memory_type::free:
+				return { [ ]( auto& ptr, bitcnt_t size ) { return make_memory_ex( ptr, size ); } };
+			case memory_type::relaxed:
+				return { [ ] ( auto& ptr, bitcnt_t size ) { return make_undefined_ex( size ); } };
+			default:
+				return { [ ] ( auto& ptr , bitcnt_t size ) { unreachable(); return expression{}; } };
+		}
 	}
 };

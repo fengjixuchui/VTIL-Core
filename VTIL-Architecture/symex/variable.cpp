@@ -27,8 +27,19 @@
 //
 #include "variable.hpp"
 
-namespace vtil::optimizer
+namespace vtil::symbolic
 {
+	// Dummy iterator to be used when variable is not being tracked within a block.
+	//
+	static const il_const_iterator free_form_iterator = ( [ ] ()
+	{
+		// Create a dummy invalid block with an invalid instruction and reference it.
+		//
+		static basic_block dummy_block;
+		dummy_block.stream.push_back( {} );
+		return dummy_block.begin();
+	}() );
+
 	// Constructs by iterator and the variable descriptor itself.
 	//
 	variable::variable( const il_const_iterator& it, descriptor_t desc ) :
@@ -44,6 +55,12 @@ namespace vtil::optimizer
 		fassert( is_valid() );
 	}
 	
+
+	// Construct free-form with only the descriptor itself.
+	//
+	variable::variable( descriptor_t desc ) 
+		: variable( free_form_iterator, std::move( desc ) ) {}
+
 	// Returns whether the variable is valid or not.
 	//
 	bool variable::is_valid() const
@@ -74,7 +91,7 @@ namespace vtil::optimizer
 
 			// Must have a valid pointer of 64 bits.
 			//
-			if ( !mem.pointer || mem.pointer->size() != 64 )
+			if ( !mem.base.base || mem.base.base.size() != 64 )
 				return false;
 
 			// Bit count should be within (0, 64] and byte-addressable.
@@ -85,10 +102,16 @@ namespace vtil::optimizer
 		}
 	}
 
+	// Returns whether it is bound to a free-form iterator or not.
+	//
+	bool variable::is_free_form() const 
+	{ 
+		return at == free_form_iterator; 
+	}
 
 	// Conversion to symbolic expression.
 	//
-	symbolic::expression variable::to_expression( bool unpack ) const
+	expression variable::to_expression( bool unpack ) const
 	{
 		// If memory, return as is.
 		//
@@ -109,7 +132,7 @@ namespace vtil::optimizer
 		// Extend to 64-bits with offset set at 0, shift it and
 		// mask it to experss the value of original register.
 		//
-		symbolic::expression&& tmp = variable{ at, register_desc{ src.flags, src.local_id, 64 } }.to_expression( false );
+		expression&& tmp = variable{ at, register_desc{ src.flags, src.local_id, 64 } }.to_expression( false );
 		return ( src.bit_offset ? tmp >> src.bit_offset : tmp ).resize( src.bit_count );
 	}
 
@@ -132,7 +155,7 @@ namespace vtil::optimizer
 		{
 			// Indicate dereferencing of the pointer expression.
 			//
-			base = format::str( "[%s]", mem->pointer->to_string() );
+			base = format::str( "[%s]", mem->decay() );
 
 			// Prefix with read size:
 			//
@@ -165,6 +188,11 @@ namespace vtil::optimizer
 		if ( !at.is_valid() )
 			return base;
 
+		// If dummy iterator, return with free-indicator appended.
+		//
+		if ( at == free_form_iterator )
+			return "%" + base;
+
 		// Append the block identifier.
 		//
 		base = format::str( "%s#0x%llx", base, at.container->entry_vip );
@@ -178,7 +206,7 @@ namespace vtil::optimizer
 
 	// Packs all the variables in the expression where it'd be optimal.
 	//
-	symbolic::expression variable::pack_all( const symbolic::expression& ref )
+	expression variable::pack_all( const expression& ref )
 	{
 		// List of ideal packers.
 		//
@@ -193,8 +221,8 @@ namespace vtil::optimizer
 
 		// Copy expression and recurse into it.
 		//
-		symbolic::expression exp = ref;
-		exp.transform( [ ] ( symbolic::expression& exp )
+		expression exp = ref;
+		exp.transform( [ ] ( expression& exp )
 		{
 			// Skip if expression has any known 1s.
 			//
@@ -271,7 +299,7 @@ namespace vtil::optimizer
 				variable var_new = var;
 				var_new.reg().bit_count = it->first;
 				var_new.reg().bit_offset += it->second;
-				exp = symbolic::expression{ var_new, it->first }.resize( exp.size() );
+				exp = expression{ var_new, it->first }.resize( exp.size() );
 				break;
 			}
 		} );

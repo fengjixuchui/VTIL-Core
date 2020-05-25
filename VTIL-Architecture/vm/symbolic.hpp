@@ -26,56 +26,39 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <algorithm>
-#include "concept.hpp"
+#include "interface.hpp"
+#include "../symex/memory.hpp"
 
 namespace vtil
 {
-	namespace impl
+	// A virtual machine implementation that executes in terms of symbolic expressions.
+	//
+	struct symbolic_vm : vm_interface
 	{
-		// Determines whether the object is random-accessable by definition or not.
+		// State of the virtual machine.
 		//
-		template<typename... D>
-		struct is_default_ra : concept_base<is_default_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], std::size( v ) );
-		};
+		symbolic::memory memory_state;
+		std::map<register_desc, symbolic::expression> register_state;
 
-		// Determine whether the object is random-accessable by a custom interface or not.
+		// Construct from memory type, defaults to free.
 		//
-		template<typename... D>
-		struct is_cutom_ra : concept_base<is_cutom_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], v.size() );
-		};
+		symbolic_vm( symbolic::memory_type mem = symbolic::memory_type::free )
+			: memory_state( symbolic::create_memory( mem ) ) {}
+
+		// Reads from the register.
+		//
+		symbolic::expression read_register( const register_desc& desc ) override;
+
+		// Writes to the register.
+		//
+		void write_register( const register_desc& desc, symbolic::expression value ) override;
+
+		// Reads the given number of bytes from the memory.
+		//
+		symbolic::expression read_memory( const symbolic::expression& pointer, size_t byte_count ) override;
+		
+		// Writes the given expression to the memory.
+		//
+		void write_memory( const symbolic::expression& pointer, symbolic::expression value ) override;
 	};
-
-	// Returns whether the given object is a random-accessable container or not.
-	//
-	template<typename T>
-	static constexpr bool is_random_access_v = 
-		impl::is_default_ra<T>::apply() ||
-		impl::is_cutom_ra<T>::apply();
-
-	// Gets the size of the given container.
-	//
-	template<typename T>
-	static size_t dynamic_size( T& o )
-	{
-		if constexpr ( impl::is_default_ra<T>::apply() )
-			return std::size( o );
-		else if constexpr ( impl::is_cutom_ra<T>::apply() )
-			return o.size();
-		return 0;
-	}
-
-	// Gets the Nth element from the object.
-	//
-	template<typename T>
-	static auto& deref_n( T& o, size_t N )
-	{
-		return o[ N ];
-	}
 };

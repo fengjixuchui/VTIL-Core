@@ -218,6 +218,13 @@ namespace vtil
 		//
 		uint32_t last_temporary_index = 0;
 
+		// Labels are a simple way to assign the same VIP for multiple 
+		// instructions that will be pushed after the call.
+		//
+		std::vector<std::pair<size_t, vip_t>> label_stack = {};
+		basic_block* label_begin( vip_t vip );
+		basic_block* label_end();
+
 		// Wrap the std::list fundamentals.
 		//
 		auto size() const { return stream.size(); }

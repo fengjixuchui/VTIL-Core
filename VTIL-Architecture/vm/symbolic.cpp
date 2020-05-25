@@ -25,57 +25,53 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE  
 // POSSIBILITY OF SUCH DAMAGE.        
 //
-#pragma once
-#include <algorithm>
-#include "concept.hpp"
+#include "symbolic.hpp"
 
 namespace vtil
 {
-	namespace impl
-	{
-		// Determines whether the object is random-accessable by definition or not.
-		//
-		template<typename... D>
-		struct is_default_ra : concept_base<is_default_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], std::size( v ) );
-		};
-
-		// Determine whether the object is random-accessable by a custom interface or not.
-		//
-		template<typename... D>
-		struct is_cutom_ra : concept_base<is_cutom_ra, D...>
-		{
-			template<typename T>
-			static auto f( const T& v ) -> decltype( v[ 0 ], v.size() );
-		};
-	};
-
-	// Returns whether the given object is a random-accessable container or not.
+	// Reads from the register.
 	//
-	template<typename T>
-	static constexpr bool is_random_access_v = 
-		impl::is_default_ra<T>::apply() ||
-		impl::is_cutom_ra<T>::apply();
-
-	// Gets the size of the given container.
-	//
-	template<typename T>
-	static size_t dynamic_size( T& o )
+	symbolic::expression symbolic_vm::read_register( const register_desc& desc )
 	{
-		if constexpr ( impl::is_default_ra<T>::apply() )
-			return std::size( o );
-		else if constexpr ( impl::is_cutom_ra<T>::apply() )
-			return o.size();
-		return 0;
+		register_desc full = { desc.flags, desc.local_id, 64, 0 };
+
+		auto it = register_state.find( full );
+		if ( it == register_state.end() )
+			return symbolic::make_register_ex( desc );
+		else
+			return ( it->second >> desc.bit_offset ).resize( desc.bit_count );
 	}
 
-	// Gets the Nth element from the object.
+	// Writes to the register.
 	//
-	template<typename T>
-	static auto& deref_n( T& o, size_t N )
+	void symbolic_vm::write_register( const register_desc& desc, symbolic::expression value )
 	{
-		return o[ N ];
+		if ( desc.bit_count == 64 && desc.bit_offset == 0 )
+		{
+			register_state.erase( desc );
+			register_state.emplace( desc, std::move( value ) );
+		}
+		else
+		{
+			register_desc full = { desc.flags, desc.local_id, 64, 0 };
+			auto& exp = register_state[ full ];
+			if ( !exp ) exp = { full, 64 };
+			exp = ( exp & ~desc.get_mask() ) | ( value.resize( desc.bit_count ).resize( 64 ) << desc.bit_offset );
+		}
+	}
+
+	// Reads the given number of bytes from the memory.
+	//
+	symbolic::expression symbolic_vm::read_memory( const symbolic::expression& pointer, size_t byte_count )
+	{
+		bitcnt_t bcnt = byte_count * 8;
+		return memory_state.read( pointer, bcnt ).value_or( { symbolic::make_undefined_ex( bcnt ) } );
+	}
+
+	// Writes the given expression to the memory.
+	//
+	void symbolic_vm::write_memory( const symbolic::expression& pointer, symbolic::expression value )
+	{
+		memory_state.write( pointer, value.resize( ( value.size() + 7 ) & ~7 ) );
 	}
 };
