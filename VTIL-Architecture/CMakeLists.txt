@@ -8,8 +8,11 @@ set(architecture_SOURCES arch/instruction_desc.cpp
     routine/serialization.cpp
     symex/pointer.cpp
     symex/variable.cpp
+    symex/translation.cpp
     vm/interface.cpp
     vm/symbolic.cpp
+    trace/cached_tracer.cpp
+    trace/tracer.cpp
 )
 
 add_library(architecture STATIC ${architecture_SOURCES})

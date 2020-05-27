@@ -26,19 +26,18 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <functional>
-#include <map>
-#include <vtil/vm>
-#include "trace.hpp"
+#include <vtil/symex>
+#include <unordered_map>
+#include "tracer.hpp"
+#include "../symex/variable.hpp"
 
-namespace vtil::optimizer
+namespace vtil
 {
     // Tracing is extremely costy and adding a simple cache reduces the cost 
-    // by ~100x fold, however we can't use a global cache since the optimizer 
-    // will change the instruction stream and all cache will be eventually 
-    // invalidated after each optimization pass so we use an instanced cache.
+    // by ~100x fold, so this class creates a local cache that gets looked 
+    // up before the actual trace operation is executed.
     //
-	struct cached_tracer
+	struct cached_tracer : tracer
 	{
         // Define the type of the cache.
         //
@@ -50,21 +49,12 @@ namespace vtil::optimizer
         //
         cache_type cache;
 
-        // Replicate trace_basic with the addition of a cache lookup.
+        // Hooks default tracer and does a cache lookup before invokation.
         //
-        symbolic::expression trace_basic_cached( const symbolic::variable& lookup, const trace_function_t& tracer = {} );
-
-        // Wrappers of trace and rtrace with cached basic tracer.
-        //
-        symbolic::expression trace( const symbolic::variable& lookup, bool pack = true );
-        symbolic::expression rtrace( const symbolic::variable& lookup, bool pack = true );
+        symbolic::expression trace( symbolic::variable lookup ) override;
 
         // Flushes the cache.
         //
-        auto flush() { cache.clear(); return *this; }
-
-        // Implicit casting to a trace function.
-        //
-        operator trace_function_t() { return [ this ] ( auto v ) { return trace_basic_cached( v ); }; }
+        void flush() { cache.clear(); }
 	};
 };

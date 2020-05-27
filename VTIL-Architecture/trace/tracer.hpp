@@ -26,44 +26,33 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include "interface.hpp"
-#include "../symex/memory.hpp"
+#include <vtil/symex>
+#include "../symex/variable.hpp"
 
 namespace vtil
 {
-	// A virtual machine implementation that executes in terms of symbolic expressions.
+	// Basic tracer implementation.
 	//
-	struct symbolic_vm : vm_interface
+	struct tracer
 	{
-		// State of the virtual machine.
+		// Traces a variable across the basic block it belongs to and generates a symbolic expression 
+		// that describes it's value at the bound point. The provided variable should not contain a 
+		// pointer with out-of-block expressions.
 		//
-		symbolic::memory memory_state;
-		std::map<register_desc, symbolic::expression> register_state;
+		virtual symbolic::expression trace( symbolic::variable lookup );
 
-		// Construct from memory type, defaults to free.
+		// Traces a variable across the entire routine and tries to generates a symbolic expression
+		// for it at the specified point of the block.
 		//
-		symbolic_vm( symbolic::memory_type mem = symbolic::memory_type::free )
-			: memory_state( symbolic::create_memory( mem ) ) {}
+		virtual symbolic::expression rtrace( symbolic::variable lookup );
 
-		// Reads from the register.
-		// - Value will be unpacked.
+		// Wrappers around the functions above that return expressions with the registers packed.
 		//
-		symbolic::expression read_register( const register_desc& desc ) override;
+		symbolic::expression trace_p( symbolic::variable lookup ) { return symbolic::variable::pack_all( trace( std::move( lookup ) ) ); }
+		symbolic::expression rtrace_p( symbolic::variable lookup ) { return symbolic::variable::pack_all( rtrace( std::move( lookup ) ) ); }
 
-		// Writes to the register.
+		// Operator() wraps basic tracing with packing.
 		//
-		void write_register( const register_desc& desc, symbolic::expression value ) override;
-
-		// Reads the given number of bytes from the memory.
-		//
-		symbolic::expression read_memory( const symbolic::expression& pointer, size_t byte_count ) override;
-		
-		// Writes the given expression to the memory.
-		//
-		void write_memory( const symbolic::expression& pointer, symbolic::expression value ) override;
-
-		// Resets the virtual machine state.
-		//
-		void reset() { memory_state.reset(); register_state.clear(); }
+		auto operator()( symbolic::variable lookup ) { return trace_p( std::move( lookup ) ); }
 	};
 };

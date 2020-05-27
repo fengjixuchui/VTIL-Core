@@ -78,6 +78,7 @@ namespace vtil
 				ins.operands[ 0 ].reg(),
 				cvt_operand( 1 ).resize( bitcnt_t( ins.operands[ 0 ].size() * 8 ), cast_signed )
 			);
+			return true;
 		}
 		// If LDD:
 		//
@@ -98,6 +99,7 @@ namespace vtil
 				ins.operands[ 0 ].reg(),
 				std::move( exp )
 			);
+			return true;
 		}
 		// If STR:
 		//
@@ -113,6 +115,7 @@ namespace vtil
 			//
 			auto [base, offset] = ins.get_mem_loc();
 			write_memory( read_register( base ) + offset, src );
+			return true;
 		}
 		// If any symbolic operator:
 		//
@@ -177,69 +180,41 @@ namespace vtil
 			// Operand 0 should always be the result for this class.
 			//
 			fassert( ins.base->operand_types[ 0 ] >= operand_type::write );
+			return true;
 		}
 		// If NOP:
 		//
 		else if ( *ins.base == ins::nop )
 		{
 			// No operation.
+			//
 			return true;
 		}
-		// If unknown instruction, fail.
+
+		// Unknown behaviour, fail.
 		//
-		else
-		{
-			return false;
-		}
-		return true;
+		return false;
 	}
-	// Given an iterator from a basic block, runs until the end of the block is reached. 
-	// If an unknown instruction is hit, breaks the loop if specified so, ignores it and
-	// sets the affected registers and memory undefined instead otherwise.
+
+	// Given an iterator from a basic block, executes every instruction until the end of the block 
+	// is reached. If an unknown instruction is hit, breaks out of the loop if specified so, otherwise
+	// ignores it setting the affected registers and memory to undefined values.
 	//
-	std::pair<il_const_iterator, vmexit_mask> vm_interface::run( il_const_iterator it, uint32_t exit_mask )
+	il_const_iterator vm_interface::run( il_const_iterator it, bool exit_on_ud )
 	{
 		// Until the iterator points at the end of the block:
 		//
 		for ( ; !it.is_end(); it++ )
 		{
-			// Check pre-exit conditions.
+			// If we could not virtualize the instruction:
 			//
-			if ( it->is_volatile() && ( exit_mask & vmexit_volatile ) )
-				return { it, vmexit_volatile };
-
-			if ( exit_mask & vmexit_volatile_register )
+			if ( !execute( *it ) )
 			{
-				for ( auto& op : it->operands )
-					if ( op.is_register() && op.reg().is_volatile() )
-						return { it, vmexit_volatile_register };
-			}
+				// Break out of the loop if specified so.
+				//
+				if ( exit_on_ud )
+					break;
 
-			if ( exit_mask & vmexit_volatile_memory )
-			{
-				if ( it->base->accesses_memory() )
-				{
-					auto [base, _] = it->get_mem_loc();
-					if ( !base.is_stack_pointer() &&
-						 !base.is_image_base() &&
-						 !read_register( base ).is_constant() )
-						return { it, vmexit_volatile_memory };
-				}
-			}
-
-			// Try to execute the instruction.
-			//
-			bool success = execute( *it );
-
-			// Check post-exit conditions.
-			//
-			if ( !success && ( exit_mask & vmexit_undefined ) )
-				return { it, vmexit_undefined };
-
-			// If it was undefined:
-			//
-			if ( !success )
-			{
 				// Make each register operand we write to undefined.
 				//
 				for ( int i = 0; i < it->base->operand_count(); i++ )
@@ -265,6 +240,6 @@ namespace vtil
 				}
 			}
 		}
-		return { it, vmexit_halt };
+		return it;
 	}
 };

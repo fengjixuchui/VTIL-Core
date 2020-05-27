@@ -26,44 +26,19 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include "interface.hpp"
-#include "../symex/memory.hpp"
+#include <vtil/symex>
+#include "variable.hpp"
+#include "../arch/operands.hpp"
+#include "../routine/basic_block.hpp"
 
 namespace vtil
 {
-	// A virtual machine implementation that executes in terms of symbolic expressions.
-	//
-	struct symbolic_vm : vm_interface
-	{
-		// State of the virtual machine.
-		//
-		symbolic::memory memory_state;
-		std::map<register_desc, symbolic::expression> register_state;
-
-		// Construct from memory type, defaults to free.
-		//
-		symbolic_vm( symbolic::memory_type mem = symbolic::memory_type::free )
-			: memory_state( symbolic::create_memory( mem ) ) {}
-
-		// Reads from the register.
-		// - Value will be unpacked.
-		//
-		symbolic::expression read_register( const register_desc& desc ) override;
-
-		// Writes to the register.
-		//
-		void write_register( const register_desc& desc, symbolic::expression value ) override;
-
-		// Reads the given number of bytes from the memory.
-		//
-		symbolic::expression read_memory( const symbolic::expression& pointer, size_t byte_count ) override;
-		
-		// Writes the given expression to the memory.
-		//
-		void write_memory( const symbolic::expression& pointer, symbolic::expression value ) override;
-
-		// Resets the virtual machine state.
-		//
-		void reset() { memory_state.reset(); register_state.clear(); }
-	};
+    // Translates the given symbolic expression into instruction equivalents, 
+    // if provided invokes the proxy for each subtranslation it needs to do.
+    //
+    operand translate_expression( 
+        const symbolic::expression& exp, 
+        basic_block* block,
+        const std::function<operand( const symbolic::expression&, basic_block* )>& proxy = {} 
+    );
 };

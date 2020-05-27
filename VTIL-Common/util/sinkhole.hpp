@@ -107,6 +107,10 @@ namespace vtil
 		const_iterator end() const { return value_map.end(); }
 		iterator erase( const_iterator x ) { return value_map.erase( std::move( x ) ); }
 
+		// Reset entire state.
+		//
+		void reset() { value_map.clear(); }
+
 		// Given a cache entry's iterator, it strips N bits at the given offset
 		// from it and creates another cache entry.
 		//
@@ -167,7 +171,7 @@ namespace vtil
 
 			// Iterace each entry in the range:
 			//
-			auto it_min = value_map.lower_bound( offset_fn{}( weaken_pointer{}( ptr ), 64 / 8 ) );
+			auto it_min = value_map.lower_bound( offset_fn{}( weaken_pointer{}( ptr ), -64 / 8 ) );
 			if ( it_min == value_map.end() ) return std::nullopt;
 			auto it_max = value_map.upper_bound( offset_fn{}( ptr, size / 8 ) );
 			if ( it_min == it_max ) return std::nullopt;
