@@ -30,7 +30,9 @@
 #include <mutex>
 #include <type_traits>
 #include <functional>
+#include <vtil/utility>
 #include "instruction.hpp"
+#include "call_convention.hpp"
 
 namespace vtil
 {
@@ -44,7 +46,7 @@ namespace vtil
 	{
 		// Mutex guarding the whole structure, more information on thread-safety can be found at basic_block.hpp.
 		//
-		std::mutex mutex;
+		mutable critical_section mutex;
 
 		// Cache of explored blocks, mapping virtual instruction pointer to the basic block structure.
 		//
@@ -54,6 +56,18 @@ namespace vtil
 		// - Can be accessed without acquiring the mutex as it will be assigned strictly once.
 		//
 		basic_block* entry_point = nullptr;
+
+		// Calling convention of the routine.
+		//
+		call_convention routine_convention = preserve_all_convention;
+
+		// Calling convention of a non-specialized VXCALL.
+		//
+		call_convention subroutine_convention = default_call_convention;
+
+		// Convention of specialized calls, maps the vip of the VXCALL instruction onto the convention used.
+		//
+		std::map<vip_t, call_convention> spec_subroutine_conventions;
 
 		// This structure cannot be copied.
 		//
@@ -68,6 +82,24 @@ namespace vtil
 			std::lock_guard _g( mutex );
 			for ( auto& [vip, block] : explored_blocks )
 				enumerator( block );
+		}
+
+		// Gets the calling convention for the given VIP (that resolves into VXCALL.
+		//
+		call_convention get_cconv( vip_t vip ) const
+		{
+			std::lock_guard _g( mutex );
+			if ( auto it = spec_subroutine_conventions.find( vip ); it != spec_subroutine_conventions.end() )
+				return it->second;
+			return subroutine_convention;
+		}
+
+		// Sets the calling convention for the given VIP (that resolves into VXCALL.
+		//
+		void set_cconv( vip_t vip, const call_convention& cc )
+		{
+			std::lock_guard _g( mutex );
+			spec_subroutine_conventions[ vip ] = cc;
 		}
 
 		// Routine structures free all basic blocks they own upon their destruction.
