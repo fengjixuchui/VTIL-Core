@@ -1,13 +1,12 @@
-# VTIL-SymEx target
-#
+project(VTIL-SymEx)
 
-set(symex_SOURCES directives/directive.cpp
+add_library(${PROJECT_NAME} STATIC
+    directives/directive.cpp
     directives/transformer.cpp
     expressions/expression.cpp
     expressions/unique_identifier.cpp
     simplifier/simplifier.cpp
 )
 
-add_library(symex STATIC ${symex_SOURCES})
-target_include_directories(symex PUBLIC "./includes")
-target_link_libraries(symex common)
+target_include_directories(${PROJECT_NAME} PUBLIC includes)
+target_link_libraries(${PROJECT_NAME} VTIL-Common)

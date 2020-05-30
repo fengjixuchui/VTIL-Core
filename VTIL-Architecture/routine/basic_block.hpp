@@ -176,6 +176,10 @@ namespace vtil
 				}
 				return output;
 			}
+
+			// Make hashable.
+			//
+			hash_t hash() const { return make_hash( container, is_end() ? 0ull : ( 1 + std::distance( container->begin(), *this ) ), paths_allowed ); }
 		};
 		using iterator =       riterator_base<basic_block, std::list<instruction>::iterator>;
 		using const_iterator = riterator_base<const basic_block, std::list<instruction>::const_iterator>;
@@ -264,7 +268,10 @@ namespace vtil
 
 		// Helpers for the allocation of unique temporary registers.
 		//
-		register_desc tmp( bitcnt_t size );
+		register_desc tmp( bitcnt_t size )
+		{
+			return { register_local, last_temporary_index++, size };
+		}
 		template<typename... params>
 		auto tmp( bitcnt_t size_0, params... size_n )
 		{

@@ -32,25 +32,27 @@
 #pragma warning(disable:4267)
 namespace vtil
 {
-	using magic_t = uint32_t;
-	static constexpr magic_t vtil_magic = 'LITV';
+	using magic_t = uint64_t;
+	static constexpr magic_t vtil_magic = 'LITV' | ( 0xDEAD0000ull << 32 );
 
 	// Serialization of VTIL calling conventions.
 	//
 	void serialize( std::ostream& out, const call_convention& in )
 	{
 		serialize( out, in.volatile_registers );
-		serialize( out, in.forbidden_registers );
+		serialize( out, in.param_registers );
 		serialize( out, in.retval_registers );
 		serialize( out, in.frame_register );
+		serialize( out, in.shadow_space );
 		serialize( out, in.purge_stack );
 	}
 	void deserialize( std::istream& in, call_convention& out )
 	{
 		deserialize( in, out.volatile_registers );
-		deserialize( in, out.forbidden_registers );
+		deserialize( in, out.param_registers );
 		deserialize( in, out.retval_registers );
 		deserialize( in, out.frame_register );
+		deserialize( in, out.shadow_space );
 		deserialize( in, out.purge_stack );
 	}
 
@@ -145,7 +147,7 @@ namespace vtil
 		for ( auto& pair : rtn->explored_blocks )
 			serialize( out, pair.second );
 	}
-	routine* deserialize( std::istream& in, routine*& rtn )
+	void deserialize( std::istream& in, routine*& rtn )
 	{
 		// Read and validate the magic.
 		//
@@ -185,7 +187,27 @@ namespace vtil
 		rtn->entry_point = rtn->explored_blocks[ entry_vip ];
 		if ( !rtn->entry_point )
 			throw std::runtime_error( "Failed resolving entry point." );
-		return rtn;
+
+		// Determine last internal id.
+		//
+		size_t last_internal_id = 0;
+		for ( auto& [v, block] : rtn->explored_blocks )
+		{
+			for ( auto& ins : *block )
+			{
+				for ( auto& op : ins.operands )
+				{
+					if ( op.is_register() && op.reg().is_internal() )
+					{
+						last_internal_id = std::max( 
+							last_internal_id, 
+							op.reg().local_id + 1 
+						);
+					}
+				}
+			}
+		}
+		rtn->last_internal_id = last_internal_id;
 	}
 
 	// Serialization of VTIL instructions.

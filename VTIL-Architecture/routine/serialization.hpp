@@ -28,6 +28,7 @@
 #pragma once
 #include <ostream>
 #include <istream>
+#include <fstream>
 #include <vector>
 #include <string>
 #include "routine.hpp"
@@ -201,7 +202,7 @@ namespace vtil
 	// Serialization of VTIL routines.
 	//
 	void serialize( std::ostream& out, const routine* rtn );
-	routine* deserialize( std::istream& in, routine*& rtn );
+	void deserialize( std::istream& in, routine*& rtn );
 
 	// Serialization of VTIL instructions.
 	//
@@ -212,5 +213,20 @@ namespace vtil
 	//
 	void serialize( std::ostream& out, const operand& in );
 	void deserialize( std::istream& in, operand& out );
+
+	// Simple wrappers for serialize / deserialize routine.
+	//
+	static void save_routine( const routine* rtn, const std::string& path )
+	{
+		std::ofstream fs( path, std::ios::binary );
+		serialize( fs, rtn );
+	}
+	static routine* load_routine( const std::string& path )
+	{
+		routine* rtn;
+		std::ifstream fs( path, std::ios::binary );
+		deserialize( fs, rtn );
+		return rtn;
+	}
 };
 #pragma warning(default:4267)

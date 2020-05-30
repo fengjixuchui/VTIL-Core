@@ -1,7 +1,7 @@
-# VTIL-Architecture target
-#
+project(VTIL-Architecture)
 
-set(architecture_SOURCES arch/instruction_desc.cpp
+add_library(${PROJECT_NAME} STATIC
+    arch/instruction_desc.cpp
     routine/basic_block.cpp
     routine/instruction.cpp
     routine/routine.cpp
@@ -15,7 +15,5 @@ set(architecture_SOURCES arch/instruction_desc.cpp
     trace/tracer.cpp
 )
 
-add_library(architecture STATIC ${architecture_SOURCES})
-target_include_directories(architecture PUBLIC "./includes")
-target_link_libraries(architecture common)
-target_link_libraries(architecture symex)
+target_include_directories(${PROJECT_NAME} PUBLIC includes)
+target_link_libraries(${PROJECT_NAME} VTIL-Common VTIL-SymEx)
