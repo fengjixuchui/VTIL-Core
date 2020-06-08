@@ -109,8 +109,7 @@ namespace vtil
 		return base.resize( bit_count );
 	}
 
-    // Propagates all variables in the reference expression onto the new iterator, if no 
-	// history pointer given will do trace instead of rtrace.
+    // Propagates all variables in the reference expression onto the new iterator, if no history pointer given will do trace instead of rtrace.
     // - Note: New iterator should be a connected block's end.
     //
     static symbolic::expression propagate( const symbolic::expression& ref, const il_const_iterator& it, tracer* tracer, path_history_t* history )
@@ -448,8 +447,8 @@ namespace vtil
 		lvm.hooks.read_memory = [ & ] ( const symbolic::expression& pointer, size_t byte_count )
 		{
 			auto exp = trace( symbolic::variable{
-				lookup.at,{ pointer, bitcnt_t( byte_count * 8 ) }
-							  } );
+				lookup.at, { pointer, bitcnt_t( byte_count * 8 ) }
+			} );
 			return exp.is_valid() ? exp.resize( result_bcnt ) : exp;
 		};
 		lvm.hooks.write_register = [ & ] ( const register_desc& desc, symbolic::expression value )
