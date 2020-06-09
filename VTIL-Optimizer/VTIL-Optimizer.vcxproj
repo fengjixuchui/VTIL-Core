@@ -93,14 +93,24 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="auxiliaries.cpp" />
-    <ClCompile Include="passes\normalize_stack.cpp" />
+    <ClCompile Include="common\auxiliaries.cpp" />
+    <ClCompile Include="passes\bblock_extension_pass.cpp" />
+    <ClCompile Include="passes\dead_code_elimination_pass.cpp" />
+    <ClCompile Include="passes\istack_ref_substitution_pass.cpp" />
+    <ClCompile Include="passes\mov_propagation_pass.cpp" />
+    <ClCompile Include="passes\stack_pinning_pass.cpp" />
+    <ClCompile Include="passes\stack_propagation_pass.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="auxiliaries.hpp" />
-    <ClInclude Include="passes\apply_all.hpp" />
-    <ClInclude Include="passes\interface.hpp" />
-    <ClInclude Include="passes\normalize_stack.hpp" />
+    <ClInclude Include="common\apply_all.hpp" />
+    <ClInclude Include="common\auxiliaries.hpp" />
+    <ClInclude Include="common\interface.hpp" />
+    <ClInclude Include="passes\bblock_extension_pass.hpp" />
+    <ClInclude Include="passes\dead_code_elimination_pass.hpp" />
+    <ClInclude Include="passes\istack_ref_substitution_pass.hpp" />
+    <ClInclude Include="passes\mov_propagation_pass.hpp" />
+    <ClInclude Include="passes\stack_pinning_pass.hpp" />
+    <ClInclude Include="passes\stack_propagation_pass.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="includes\vtil\optimizer" />

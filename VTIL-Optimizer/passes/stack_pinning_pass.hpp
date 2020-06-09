@@ -26,15 +26,15 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include "normalize_stack.hpp"
+#include <vtil/arch>
+#include "../common/interface.hpp"
 
 namespace vtil::optimizer
 {
-	// TODO: Add a wrapping validation pass and validated_t<T> to nop | apply depending on _DEBUG.
+	// Attempts to merge the value of REG_SP accross the block.
 	//
-
-	// Combined pass for each optimization.
-	//
-	using combined_pass_type = combine_pass<stack_normalization_pass/*, dead_elimination_pass*/>;
-	static constexpr spawn_state<combined_pass_type> apply_all = {};
+	struct stack_pinning_pass : pass_interface<>
+	{
+		size_t pass( basic_block* blk, bool xblock = false ) override;
+	};
 };

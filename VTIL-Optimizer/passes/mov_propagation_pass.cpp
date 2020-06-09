@@ -1,0 +1,140 @@
+// Copyright (c) 2020 Can Boluk and contributors of the VTIL Project   
+// All rights reserved.   
+//    
+// Redistribution and use in source and binary forms, with or without   
+// modification, are permitted provided that the following conditions are met: 
+//    
+// 1. Redistributions of source code must retain the above copyright notice,   
+//    this list of conditions and the following disclaimer.   
+// 2. Redistributions in binary form must reproduce the above copyright   
+//    notice, this list of conditions and the following disclaimer in the   
+//    documentation and/or other materials provided with the distribution.   
+// 3. Neither the name of mosquitto nor the names of its   
+//    contributors may be used to endorse or promote products derived from   
+//    this software without specific prior written permission.   
+//    
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE  
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE   
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR   
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF   
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS   
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN   
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)   
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE  
+// POSSIBILITY OF SUCH DAMAGE.        
+//
+#include "mov_propagation_pass.hpp"
+#include <vtil/query>
+#include "../common/auxiliaries.hpp"
+
+namespace vtil::optimizer
+{
+	// Implement a mov tracer that does not trace any symbolic operations.
+	//
+	struct mov_tracer : cached_tracer
+	{
+		// Declare an iterator that is exempt from this restriction, which is the query origin.
+		//
+		il_const_iterator bypass = {};
+
+		// Override tracer.
+		//
+		symbolic::expression trace( symbolic::variable lookup ) override
+		{
+			// If at bypass point or at the end (due to recursion, invoke original).
+			//
+			if ( lookup.at == bypass || lookup.at.is_end() )
+				return cached_tracer::trace( std::move( lookup ) );
+
+			// If at move:
+			//
+			if ( *lookup.at->base == ins::mov )
+			{
+				// Return source as is.
+				//
+				auto& src = lookup.at->operands[ 1 ];
+				if ( src.is_register() )
+					return symbolic::variable{ lookup.at, src.reg() }.to_expression();
+				else
+					return { src.imm().u64, ( bitcnt_t ) src.size() * 8 };
+			}
+
+			// Otherwise, return the lookup expression and skip tracing.
+			//
+			return lookup.to_expression();
+		}
+	};
+
+	// Implement the pass.
+	//
+	size_t mov_propagation_pass::pass( basic_block* blk, bool xblock ) 
+	{ 
+		size_t counter = 0;
+		mov_tracer mtracer = {};
+		cached_tracer ctracer = {};
+
+		// Iterate each instruction:
+		//
+		for ( auto it = blk->begin(); it != blk->end(); it++ )
+		{
+			// Enumerate each operand:
+			//
+			for ( auto [op, type] : it->enum_operands() )
+			{
+				// Skip if being written to or if immediate.
+				//
+				if ( type >= operand_type::write || !op.is_register() )
+					continue;
+
+				// Declare bypass point and trace it.
+				//
+				mtracer.bypass = it;
+				auto res = xblock ? mtracer.rtrace_p( { it, op.reg() } ) : mtracer.trace_p( { it, op.reg() } );
+				
+				// Skip if invalid result or if we resolved it into an expression.
+				//
+				if ( res.is_expression() || !res.is_valid() )
+					continue;
+
+				// If constant:
+				//
+				if ( res.is_constant() )
+				{
+					// Replace the operand with a constant.
+					//
+					op = { *res.get(), ( bitcnt_t ) op.size() * 8 };
+				}
+				// If variable:
+				//
+				else
+				{
+					// Skip if not register.
+					//
+					auto& var = res.uid.get<symbolic::variable>();
+					if ( !var.is_register() )
+						continue;
+					auto& reg = var.reg();
+
+					// Skip if stack pointer or if equivalent.
+					//
+					if ( reg.is_stack_pointer() || reg == op.reg() )
+						continue;
+
+					// Skip if value is dead, otherwise replace operand.
+					//
+					if ( !aux::is_alive( var, it, &ctracer ) )
+						continue;
+					op = var.reg();
+				}
+
+				// Validate modification and increment counter.
+				//
+				fassert( it->is_valid() );
+				counter++;
+			}
+		}
+		return counter;
+	}
+};
