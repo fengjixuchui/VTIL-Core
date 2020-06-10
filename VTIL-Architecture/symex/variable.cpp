@@ -267,15 +267,13 @@ namespace vtil::symbolic
 		{
 			// Get calling convention.
 			//
-			call_convention cc = it.container->owner
-				? it.container->owner->get_cconv( it->vip )
-				: default_call_convention;
+			call_convention cc = it.container->owner->get_cconv( it->vip );
 
 			// If variable is a register:
 			//
 			if ( var.is_register() )
 			{
-				const register_desc& reg = var.reg();
+				auto& reg = var.reg();
 
 				// If exiting the virtual machine:
 				//
@@ -308,15 +306,6 @@ namespace vtil::symbolic
 						if ( retval.overlaps( reg ) )
 							return access_details{ .bit_count = 0, .read = false, .write = false };
 					}
-				
-					// Otherwise indicate read from.
-					//
-					return access_details{
-						.bit_offset = 0,
-						.bit_count = reg.bit_count,
-						.read = true, 
-						.write = false
-					};
 
 					// If virtual register, indicate it's discarded.
 					//
@@ -327,6 +316,15 @@ namespace vtil::symbolic
 						else
 							return access_details{ .bit_count = 0, .read = false, .write = false };
 					}
+
+					// Otherwise indicate read from.
+					//
+					return access_details{
+						.bit_offset = 0,
+						.bit_count = reg.bit_count,
+						.read = true,
+						.write = false
+					};
 				}
 
 				// If not only looking for read access, check if register is written to.
@@ -381,10 +379,33 @@ namespace vtil::symbolic
 					.write = true
 				};
 			}
-			// If variable is memory, report unknown access. (TODO: Propper parsing!)
+			// If variable is memory:
 			//
 			else
 			{
+				auto& mem = var.mem();
+
+				// If vmexit, declared trashed if below or at the shadow space:
+				//
+				if ( *it->base == ins::vexit )
+				{
+					// Determine the limit of the stack memory owned by this routine.
+					//
+					symbolic::expression limit = 
+						tracer->trace( { it, REG_SP } ) + 
+						it.container->sp_offset + 
+						it.container->owner->routine_convention.shadow_space;
+
+					// Calculate the displacement, if constant below 0, declare trashed.
+					//
+					access_details details;
+					fill_displacement( &details, pointer{ limit }, mem.base, tracer );
+					if ( details.is_unknown() && ( details.bit_offset + details.bit_count ) <= 0 )
+						return access_details{ .bit_count = 0, .read = false, .write = false };
+				}
+
+				// Report unknown access: (TODO: Proper parsing!)
+				// - We can estimate usage based on 
 				return access_details{ .bit_offset = -1, .bit_count = -1 };
 			}
 		}
@@ -397,12 +418,12 @@ namespace vtil::symbolic
 	// Constructs by iterator and the variable descriptor itself.
 	//
 	variable::variable( const il_const_iterator& it, descriptor_t desc ) :
-		descriptor( std::move( desc ) ), at( it )
+		descriptor( std::move( desc ) )
 	{
 		// If read-only register, remove the iterator.
 		//
-		if ( is_register() && reg().is_read_only() )
-			at = {};
+		if ( is_register() && reg().is_read_only() ) bind( {} );
+		else                                         bind( it );
 
 		// Validate the variable.
 		//
