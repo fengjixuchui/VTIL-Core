@@ -27,18 +27,19 @@
 //
 #pragma once
 #include <vtil/arch>
-#include <set>
+#include <shared_mutex>
 #include "../common/interface.hpp"
 
 namespace vtil::optimizer
 {
-	// Attempts to merge multiple basic blocks into a single extended basic block.
+	// Eliminates each prev-next link where the jump is not possible after
+	// the elimination of opaque predicates, removes the entire block if
+	// it was left without any references.
 	//
-	struct bblock_extension_pass : pass_interface<true>
+	struct opaque_predicate_elimination_pass : pass_interface<>
 	{
-		// List of blocks we have already visited, refreshed per xpass call.
-		//
-		std::set<basic_block*> visit_list;
+		std::mutex mtx;
+		cached_tracer ctracer = {};
 
 		size_t pass( basic_block* blk, bool xblock = false ) override;
 		size_t xpass( routine* rtn ) override;

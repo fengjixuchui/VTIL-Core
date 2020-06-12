@@ -49,14 +49,15 @@ namespace vtil::optimizer
 				{
 					// If index 0, return as is.
 					//
-					if ( ( lookup.at.is_end() ? lookup.at.container->sp_index : lookup.at->sp_index ) == 0 )
+					uint32_t sp_index = lookup.at.is_end() ? lookup.at.container->sp_index : lookup.at->sp_index;
+					if ( sp_index == 0 )
 						return symbolic::variable{ lookup.at.container->begin(), REG_SP }.to_expression();
 
 					// Otherwise, return unique pseudo-register per stack instance.
 					//
 					register_desc desc = {
 						register_local,
-						lookup.at->sp_index + idx_special,
+						sp_index + idx_special,
 						lookup.reg().bit_count
 					};
 					return symbolic::variable{ lookup.at.container->begin(), desc }.to_expression();
@@ -73,7 +74,7 @@ namespace vtil::optimizer
 			return cached_tracer::trace( std::move( lookup ) );
 		}
 
-		symbolic::expression rtrace( symbolic::variable lookup ) override
+		symbolic::expression rtrace( symbolic::variable lookup, int64_t limit = -1 ) override
 		{
 			// Invoke default tracer and store the result.
 			//
@@ -87,7 +88,7 @@ namespace vtil::optimizer
 				//
 				auto& var = result.uid.get<symbolic::variable>();
 				if ( var.is_memory() && !aux::is_local( var.mem().decay() ) )
-					return tracer::rtrace( var );
+					return tracer::rtrace( var, limit );
 			}
 			return result;
 		}

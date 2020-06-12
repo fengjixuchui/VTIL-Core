@@ -27,14 +27,16 @@
 //
 #pragma once
 #include <vtil/arch>
+#include <shared_mutex>
 #include "../common/interface.hpp"
 
 namespace vtil::optimizer
 {
 	// Attempts to forward any movs to the actual uses of them where possible.
 	//
-	struct mov_propagation_pass : pass_interface<true>
+	struct mov_propagation_pass : pass_interface<>
 	{
+		std::shared_mutex mtx;
 		size_t pass( basic_block* blk, bool xblock = false ) override;
 	};
 };

@@ -85,15 +85,19 @@ namespace vtil::optimizer::aux
 		uint64_t variable_mask;
 		auto blueprint = query::dummy<il_const_iterator>().unproject();
 
+		// Allocate dummy pointer.
+		//
+		symbolic::variable ptr_var;
+
 		// If memory variable:
 		//
 		if ( var.is_memory() )
 		{
-			auto& mem = var.mem();
+			ptr_var = var;
 
 			// If it can't be simplified into $sp + C, assume used.
 			//
-			std::optional delta_o = mem.decay().evaluate( [ ] ( const symbolic::unique_identifier& uid )
+			std::optional delta_o = var.mem().decay().evaluate( [ ] ( const symbolic::unique_identifier& uid )
 															-> std::optional<uint64_t>
 			{
 				auto var = uid.get<symbolic::variable>();
@@ -105,7 +109,7 @@ namespace vtil::optimizer::aux
 
 			// Create a mask for the variable and a path.
 			//
-			variable_mask = math::fill( mem.bit_count );
+			variable_mask = math::fill( var.mem().bit_count );
 
 			// Declare iteration logic.
 			//
@@ -114,9 +118,27 @@ namespace vtil::optimizer::aux
 				// @ Clear from the active mask per overwrite.
 				.run( [ & ] ( const il_const_iterator& it ) 
 				{
+					auto& pvar = query::rlocal( ptr_var );
+
+					// Propagate pointer if needed.
+					//
+					if ( pvar.at.container != it.container )
+					{
+						if ( pvar.at.container->sp_index == 0 )
+						{
+							symbolic::expression exp = pvar.mem().decay();
+							exp = 
+								exp
+								- pvar.at.container->sp_offset 
+								+ symbolic::variable{ it.container->begin(), REG_SP }.to_expression()
+								- symbolic::variable{ pvar.at.container->begin(), REG_SP }.to_expression();
+							pvar = symbolic::variable{ it.container->begin(), { symbolic::pointer{ exp }, pvar.mem().bit_count } };
+						}
+					}
+
 					// If instruction is branching, check if stack is discarded.
 					//
-					if ( it->base->is_branching() )
+					if ( it->base->is_branching() && it.container->owner->routine_convention.purge_stack )
 					{
 						// Assert this instruction does not read memory.
 						//
@@ -124,7 +146,7 @@ namespace vtil::optimizer::aux
 
 						// Determine the displacement between high write and discarded limit.
 						//
-						symbolic::expression write_high = mem.decay() + ( mem.bit_count / 8 );
+						symbolic::expression write_high = pvar.mem().decay() + ( pvar.mem().bit_count / 8 );
 						symbolic::expression discard_limit = rel_ptr( { it, REG_SP } ) + it->sp_offset;
 						std::optional disp = ( write_high - discard_limit ).get<true>();
 
@@ -136,7 +158,7 @@ namespace vtil::optimizer::aux
 
 					// Skip if variable is not written to by this instruction.
 					//
-					auto details = var.written_by( it, tracer );
+					auto details = pvar.written_by( it, tracer );
 					if ( !details ) return;
 
 					// If also read or if unknown access, skip.
@@ -150,14 +172,16 @@ namespace vtil::optimizer::aux
 				} )
 
 				// | Skip further checks if value is dead.
-				.where( [ & ] ( const il_const_iterator& it ) { return query::rlocal( variable_mask ) != 0; } )
+				.whilst( [ & ] ( const il_const_iterator& it ) { return query::rlocal( variable_mask ) != 0; } )
 
 				// >> Select the instructions that read the value previously written.
 				.where( [ & ] ( const il_const_iterator& it )
 				{
+					auto& pvar = query::rlocal( ptr_var );
+
 					// Skip if variable is not read by this instruction.
 					//
-					auto details = var.read_by( it, tracer );
+					auto details = pvar.read_by( it, tracer );
 					if ( !details ) return false;
 
 					// If unknown access, continue.
@@ -176,7 +200,7 @@ namespace vtil::optimizer::aux
 					{
 						// Use the symbolic variable API.
 						//
-						if ( auto details = var.accessed_by( it, tracer ) )
+						if ( auto details = pvar.accessed_by( it, tracer ) )
 						{
 							// If unknown, assume used.
 							//
@@ -209,7 +233,7 @@ namespace vtil::optimizer::aux
 			//
 			if ( reg.is_volatile() )
 				return true;
-		
+
 			// Create a mask for the variable.
 			//
 			variable_mask = reg.get_mask();
@@ -222,9 +246,8 @@ namespace vtil::optimizer::aux
 			// Declare iteration logic.
 			//
 			blueprint
-
 				// | Skip further checks if value is dead.
-				.where( [ & ] ( const il_const_iterator& it ) { return query::rlocal( variable_mask ) != 0; } )
+				.whilst( [ & ] ( const il_const_iterator& it ) { return query::rlocal( variable_mask ) != 0; } )
 
 				// @ Clear from the active mask per overwrite.
 				.run( [ & ] ( const il_const_iterator& it ) 
@@ -294,14 +317,15 @@ namespace vtil::optimizer::aux
 		if ( rec )
 		{
 			int skip_count = 0;
+
 			// => Begin forward iterating query:
 			auto res = query::create_recursive( var.at, +1 )
 
 				// >> Skip one.
-				.where( [ & ] ( auto& ) { return skip_count++ >= 1; } )
+				.where( [ & ] ( auto& ) { return query::rlocal( skip_count )++ >= 1; } )
 
 				// @ Make the current mask local per recursion.
-				.bind( variable_mask )
+				.bind( variable_mask, ptr_var, skip_count )
 
 				// @ Attach controller.
 				.control( blueprint.to_controller() )
@@ -434,9 +458,7 @@ namespace vtil::optimizer::aux
 
 		// If cross block operation, lock routine mutex.
 		//
-		auto _g = it.container != var.at.container
-			? std::unique_lock{ it.container->owner->mutex }
-		: std::unique_lock<critical_section>{};
+		cnd_unique_lock _g{ it.container->owner->mutex, it.container != var.at.container };
 
 		// Drop const-qualifiers, this operation is not illegal since we're passed 
 		// non-constant iterator, meaning we have access to the routine itself.
@@ -456,7 +478,70 @@ namespace vtil::optimizer::aux
 		for ( auto [op, type] : access_point->enum_operands() )
 			if ( type < operand_type::write && op.is_register() && op.reg() == var.reg() )
 				op = temporary;
-		source->insert( access_point, { &ins::mov,{ temporary, var.reg() } } );
+		source->insert( access_point, { &ins::mov, { temporary, var.reg() } } );
 		return temporary;
+	}
+
+	// Returns each possible branch destination of the given basic block in the format of:
+	// - [is_real, target] x N
+	//
+	std::vector<std::pair<bool, symbolic::expression>> discover_branches( const basic_block* blk, tracer* tracer, bool xblock )
+	{
+		// If block is not complete, return empty vector.
+		//
+		std::vector<std::pair<bool, symbolic::expression>> targets = {};
+		if ( !blk->is_complete() )
+			return targets;
+
+		// Declare operand->expression helper.
+		//
+		auto branch = std::prev( blk->end() );
+		auto discover = [ & ] ( const operand& op_dst, bool real )
+		{
+			// Determine the symbolic expression describing branch destination.
+			//
+			symbolic::expression destination = op_dst.is_immediate()
+				? symbolic::expression{ op_dst.imm().u64 }
+				: ( xblock ? tracer->rtrace_p( { branch, op_dst.reg() } ) : tracer->trace_p( { branch, op_dst.reg() } ) );
+
+			// Remove any matches of REG_IMGBASE and pack.
+			//
+			destination.transform( [ ] ( symbolic::expression& ex )
+			{
+				if ( ex.is_variable() )
+				{
+					auto& var = ex.uid.get<symbolic::variable>();
+					if ( var.is_register() && var.reg() == REG_IMGBASE )
+						ex = { 0, ex.size() };
+				}
+			} ).simplify( true );
+
+			// Match classic Jcc:
+			//
+			using namespace symbolic::directive;
+			std::vector<symbol_table_t> results;
+			if ( fast_match( &results, U + ( __if( A, C ) + __if( B, D ) ), destination ) )
+			{
+				auto& sym = results.front();
+				if ( sym.translate( A )->equals( ~sym.translate( B ) ) )
+				{
+					targets.emplace_back( real, sym.translate( U ) + sym.translate( C ) );
+					targets.emplace_back( real, sym.translate( U ) + sym.translate( D ) );
+					return;
+				}
+			}
+
+			// If not, push as is.
+			//
+			targets.emplace_back( real, destination );
+		};
+
+		// Discover all targets and return.
+		//
+		for ( int idx : branch->base->branch_operands_vip )
+			discover( branch->operands[ idx ], false );
+		for ( int idx : branch->base->branch_operands_rip )
+			discover( branch->operands[ idx ], true );
+		return targets;
 	}
 };
