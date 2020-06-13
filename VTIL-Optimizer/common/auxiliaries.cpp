@@ -278,7 +278,7 @@ namespace vtil::optimizer::aux
 
 						// If register overlaps, and value is alive, pick.
 						//
-						if ( op.reg().overlaps( reg ) && query::rlocal( variable_mask ) & op.reg().get_mask() )
+						if ( op.reg().overlaps( reg ) && ( query::rlocal( variable_mask ) & op.reg().get_mask() ) )
 							return true;
 					}
 
@@ -362,14 +362,20 @@ namespace vtil::optimizer::aux
 			if ( res.has_value() ) 
 				return true;
 
-			// If there is a next block and mask is not cleared:
+			// If mask is not cleared:
 			//
-			if ( !var.at.container->next.empty() && variable_mask != 0 )
+			if ( variable_mask != 0 )
 			{
 				// If query was restricted, report used if not local register.
 				//
 				if ( is_restricted )
+				{
+					// If block is complete and is exiting vm, report not used.
+					//
+					if ( var.at.container->is_complete() && *var.at.container->stream.back().base == ins::vexit )
+						return false;
 					return !var.is_register() || !var.reg().is_local();
+				}
 			}
 
 			// Report not used.

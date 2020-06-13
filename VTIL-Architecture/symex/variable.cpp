@@ -279,11 +279,6 @@ namespace vtil::symbolic
 				//
 				if ( *it->base == ins::vexit )
 				{
-					// If checking for write only, return no-acccess.
-					//
-					if( write )
-						return access_details{ .bit_count = 0, .read = false, .write = false };
-
 					// If retval register, indicate read from:
 					//
 					for ( const register_desc& retval : it.container->owner->routine_convention.retval_registers )
@@ -304,7 +299,12 @@ namespace vtil::symbolic
 					for ( const register_desc& retval : it.container->owner->routine_convention.volatile_registers )
 					{
 						if ( retval.overlaps( reg ) )
-							return access_details{ .bit_count = 0, .read = false, .write = false };
+						{
+							if ( !read )
+								return access_details{ .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
+							else
+								return access_details{ .bit_count = 0, .read = false, .write = false };
+						}
 					}
 
 					// If virtual register, indicate discarded:
@@ -338,6 +338,7 @@ namespace vtil::symbolic
 						{
 							wdetails.bit_offset = param.bit_offset - reg.bit_offset;
 							wdetails.bit_count = param.bit_count;
+							wdetails.write = true;
 							break;
 						}
 					}
@@ -347,6 +348,7 @@ namespace vtil::symbolic
 						{
 							wdetails.bit_offset = retval.bit_offset - reg.bit_offset;
 							wdetails.bit_count = retval.bit_count;
+							wdetails.write = true;
 							break;
 						}
 					}
@@ -363,6 +365,7 @@ namespace vtil::symbolic
 						{
 							rdetails.bit_offset = param.bit_offset - reg.bit_offset;
 							rdetails.bit_count = param.bit_count;
+							rdetails.read = true;
 							break;
 						}
 					}

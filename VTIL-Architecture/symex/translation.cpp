@@ -57,12 +57,9 @@ namespace vtil
 		//
 		const auto force_clobber_register = [ & ] ( operand& op )
 		{
-			if ( op.is_register() )
-			{
-				operand tmp = block->tmp( bitcnt_t( op.size() * 8 ) );
-				block->mov( tmp, op );
-				op = tmp;
-			}
+			operand tmp = block->tmp( bitcnt_t( op.size() * 8 ) );
+			block->mov( tmp, op );
+			op = tmp;
 		};
 
 		// Converts the given symbolic expression into an operand after translating.
@@ -114,8 +111,16 @@ namespace vtil
 					}
 					else
 					{
+						operand base = cvt( var.mem().decay() );
+						if ( base.is_immediate() )
+						{
+							operand tmp2 = block->tmp( 64 );
+							block->mov( tmp2, base );
+							base = tmp2;
+						}
+
 						operand tmp = block->tmp( exp.size() );
-						block->ldd( tmp, cvt( var.mem().decay() ), 0 );
+						block->ldd( tmp, base, 0 );
 						return tmp;
 					}
 				}
