@@ -93,16 +93,11 @@ namespace vtil
 	//
 	basic_block* basic_block::label_begin( vip_t vip )
 	{
-		label_stack.emplace_back( stream.size(), vip );
+		label_stack.push_back( vip );
 		return this;
 	}
 	basic_block* basic_block::label_end()
 	{
-		auto [n, vip] = label_stack.back();
-		std::for_each( std::next( stream.begin(), n ), stream.end(), [ v = vip_t( vip ) ]( instruction& ins )
-		{
-			ins.vip = ins.vip == invalid_vip ? v : ins.vip;
-		} );
 		label_stack.pop_back();
 		return this;
 	}
@@ -141,6 +136,11 @@ namespace vtil
 	basic_block::iterator basic_block::insert( const const_iterator& it_const, instruction&& ins )
 	{
 		fassert( ins.is_valid() );
+
+		// If label stack is not empty and instruction has an invalid vip, use the last label pushed.
+		//
+		if ( !label_stack.empty() && ins.vip == invalid_vip )
+			ins.vip = label_stack.back();
 
 		// Drop const qualifier of the iterator, since we are in a non-const 
 		// qualified member function, this qualifier is unnecessary.

@@ -203,7 +203,7 @@ namespace vtil
 
 			// Make hashable.
 			//
-			hash_t hash() const { return make_hash( container, is_end() ? 0ull : ( 1 + std::distance( container->begin(), *this ) ), paths_allowed ); }
+			hash_t hash() const { return make_hash( container, is_end() ? nullptr : iterator_type::operator->() ) ; }
 		};
 		using iterator =       riterator_base<basic_block, std::list<instruction>::iterator>;
 		using const_iterator = riterator_base<const basic_block, std::list<instruction>::const_iterator>;
@@ -249,9 +249,13 @@ namespace vtil
 		// Labels are a simple way to assign the same VIP for multiple 
 		// instructions that will be pushed after the call.
 		//
-		std::vector<std::pair<size_t, vip_t>> label_stack = {};
+		std::vector<vip_t> label_stack = {};
 		basic_block* label_begin( vip_t vip );
 		basic_block* label_end();
+
+		// Multivariate runtime context.
+		//
+		mutable multivariate context = {};
 
 		// Wrap the std::list fundamentals.
 		//
@@ -412,7 +416,7 @@ namespace vtil
 				//
 				int64_t padding_size = stack_alignment - misalignment;
 				shift_sp( -padding_size );
-				str( REG_SP, sp_offset, operand( 0, padding_size * 8 ) );
+				str( REG_SP, sp_offset, operand( 0, math::narrow_cast<bitcnt_t>( padding_size * 8 ) ) );
 			}
 
 			// Shift and write the operand.

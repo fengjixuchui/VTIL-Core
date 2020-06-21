@@ -34,6 +34,7 @@
 // Define _AddressOfReturnAddress() for compilers that do not have it.
 //
 #if not defined(_MSC_VER) and not defined(__INTELLISENSE__)
+	#define __forceinline __attribute__((always_inline))
 	#define _AddressOfReturnAddress() __builtin_frame_address(0)
 #endif
 
@@ -93,14 +94,14 @@ namespace vtil
 		inline static T* reloc_const( const T* ptr, const void* src, void* dst )
 		{
 			int64_t reloc_delta = ( int64_t ) dst - ( int64_t ) src;
-			return ( T* ) ( ( size_t ) ptr + reloc_delta );
+			return ( T* ) ( ( uint64_t ) ptr + reloc_delta );
 		}
 
 		template<typename T>
 		inline static T& reloc_const( const T& ref, const void* src, void* dst )
 		{
 			int64_t reloc_delta = ( int64_t ) dst - ( int64_t ) src;
-			return *( T* ) ( ( size_t ) &ref + reloc_delta );
+			return *( T* ) ( ( uint64_t ) &ref + reloc_delta );
 		}
 	};
 
@@ -229,7 +230,7 @@ namespace vtil
 	// note that they should not be stored under any condition.
 	//
 	template<typename T>
-	inline static shared_reference<T> make_local_reference( T* variable_pointer )
+	__forceinline static shared_reference<T> make_local_reference( T* variable_pointer )
 	{
 		// Save current frame address.
 		//
@@ -242,7 +243,7 @@ namespace vtil
 		{
 			// Should not be destructed above current frame.
 			//
-			fassert( creation_frame > _AddressOfReturnAddress() );
+			fassert( creation_frame >= _AddressOfReturnAddress() );
 		} };
 
 		// Mark as locked and return.

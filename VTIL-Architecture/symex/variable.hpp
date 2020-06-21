@@ -47,17 +47,18 @@ namespace vtil::symbolic
 	{
 		// Relative offset to the variable, in bits.
 		//
-		bitcnt_t bit_offset;
+		bitcnt_t bit_offset = 0;
 
 		// Number of bits the instruction wrote at that offset.
 		// - Note: Not necessarily all have to be overlapping with the variable.
 		//
-		bitcnt_t bit_count;
+		bitcnt_t bit_count = 0;
 
 		// Type of access.
 		//
-		bool read;
-		bool write;
+		bool read = false;
+		bool write = false;
+		bool unknown = false;
 
 		// Cast to bool to check if non-null access.
 		//
@@ -65,7 +66,7 @@ namespace vtil::symbolic
 
 		// Check if details are unknown.
 		//
-		bool is_unknown() { return bit_offset == -1; }
+		bool is_unknown() { return unknown; }
 	};
 
 	// A pseudo single-static-assignment variable describing the state of a 
@@ -178,7 +179,7 @@ namespace vtil::symbolic
 
 		// Declare reduction.
 		//
-		REDUCE_TO( dereference_if( !at.is_end(), at ).pointer, at.is_valid() ? at.container->entry_vip : invalid_vip, descriptor, is_branch_dependant );
+		REDUCE_TO( at.is_end() ? nullptr : at.operator->(), at.is_valid() ? at.container : nullptr, descriptor, is_branch_dependant );
 
 		// Packs all the variables in the expression where it'd be optimal.
 		//
@@ -189,9 +190,9 @@ namespace vtil::symbolic
 		// access details as described by access_details. Tracer is used for
 		// pointer resolving, if nullptr passed will use default tracer.
 		//
-		access_details read_by( const il_const_iterator& it, tracer* tr = nullptr ) const;
-		access_details written_by( const il_const_iterator& it, tracer* tr = nullptr ) const;
-		access_details accessed_by( const il_const_iterator& it, tracer* tr = nullptr ) const;
+		access_details read_by( const il_const_iterator& it, tracer* tr = nullptr, bool xblock = false ) const;
+		access_details written_by( const il_const_iterator& it, tracer* tr = nullptr, bool xblock = false ) const;
+		access_details accessed_by( const il_const_iterator& it, tracer* tr = nullptr, bool xblock = false ) const;
 	};
 
 	// Wrappers for quick variable->expression creaton.

@@ -109,6 +109,38 @@ namespace vtil
 		return base.resize( bit_count );
 	}
 
+	// Applies transformation per each unique variable in the expression.
+	//
+	static void transform_variables( symbolic::expression& inout, const std::function<symbolic::expression(const symbolic::variable&)>& fn )
+	{
+		std::map<symbolic::variable, symbolic::expression> cache;
+		inout.transform( [ &cache, &fn ] ( symbolic::expression& exp )
+		{
+			// Skip if not variable.
+			//
+			if ( !exp.is_variable() )
+				return;
+
+			// Skip if variable is position indepdendent.
+			//
+			symbolic::variable& var = exp.uid.get<symbolic::variable>();
+			if ( !var.at.is_valid() || !var.at.is_begin() )
+				return;
+
+			// If transformation is not already cached, transform it.
+			//
+			auto& cached_result = cache[ var ];
+			if ( !cached_result )
+				cached_result = fn( var );
+
+			// Apply the transformation.
+			//
+			exp = cached_result;
+		} );
+	}
+
+
+
     // Propagates all variables in the reference expression onto the new iterator, if no history pointer given will do trace instead of rtrace.
 	// Returns an additional boolean parameter that indicates, if the propagation failed, it was due to a total failure or not; total failure
 	// meaning the origin expression was a variable and it infinite-looped during propagation by itself.
@@ -149,8 +181,15 @@ namespace vtil
                 // from the beginning of the block as that indicates use before assignment.
                 // Make sure this is not the case.
                 //
-                if ( var.reg().flags & register_local )
-                    error( "Local variable %s is used before value assignment.\n", var );
+				if ( var.reg().flags & register_local )
+				{
+					warning( 
+						"Local variable %s is used before value assignment (Block %x:%x).\n", 
+						var, 
+						var.at.container->owner->entry_point->entry_vip, 
+						var.at.container->entry_vip 
+					);
+				}
 
                 // If volatile iterator cannot be moved, skip.
                 //
@@ -355,34 +394,6 @@ namespace vtil
 		if ( lookup.at.is_begin() || ( lookup.is_register() && ( lookup.reg().flags & ( register_volatile | register_readonly ) ) ) )
 			return lookup.to_expression();
 
-	#ifdef _DEBUG
-		// If memory, make sure pointer is expressed as a variable within current block.
-		//
-		if ( lookup.is_memory() )
-		{
-			using validator_t = std::function<void( const symbolic::expression& )>;
-			static const std::function<validator_t( const basic_block* )> make_validator = [ ] ( const basic_block* container )
-			{
-				return[ container = std::move( container ) ]( auto& exp )
-				{
-					if ( exp.is_variable() )
-					{
-						// Make sure it either has no iterator or belongs to the current container.
-						//
-						auto& var = exp.uid.get<symbolic::variable>();
-						fassert( !var.at.is_valid() || var.at.container == container );
-
-						// If memory variable, validate pointer as well.
-						//
-						if ( var.is_memory() )
-							var.mem().decay().enumerate( make_validator( container ) );
-					}
-				};
-			};
-			lookup.mem().decay().enumerate( make_validator( lookup.at.container ) );
-		}
-	#endif
-
 		// Fast forward until iterator writes to the lookup, if none found return as is.
 		//
 		symbolic::access_details details = {};
@@ -399,7 +410,7 @@ namespace vtil
 
 			// If variable is being written to, break.
 			//
-			if ( details = lookup.written_by( lookup.at, this ) )
+			if ( details = lookup.written_by( lookup.at, this, recursive_flag ) )
 			{
 				// If unknown access, return unknown.
 				//
@@ -469,7 +480,7 @@ namespace vtil
 		lvm.hooks.read_memory = [ & ] ( const symbolic::expression& pointer, size_t byte_count )
 		{
 			auto exp = trace( symbolic::variable{
-				lookup.at, { pointer, bitcnt_t( byte_count * 8 ) }
+				lookup.at, { pointer, math::narrow_cast<bitcnt_t>( byte_count * 8 ) }
 			} );
 			return exp.is_valid() ? exp.resize( result_bcnt ) : exp;
 		};
@@ -501,6 +512,25 @@ namespace vtil
 	//
 	symbolic::expression tracer::rtrace( symbolic::variable lookup, int64_t limit )
 	{
-		return rtrace_primitive( lookup, this, {}, limit + 1 );
+		bool recursive_flag_prev = recursive_flag;
+		recursive_flag = true;
+		auto exp = rtrace_primitive( lookup, this, {}, limit + 1 );
+		recursive_flag = recursive_flag_prev;
+		return exp;
+	}
+	
+	// Wrappers around trace and rtrace that can trace an entire expression.
+	//
+	symbolic::expression tracer::trace_exp( const symbolic::expression& exp )
+	{
+		symbolic::expression out = exp;
+		transform_variables( out, [ & ] ( const symbolic::variable& var ) { return trace( var ); } );
+		return out;
+	}
+	symbolic::expression tracer::rtrace_exp( const symbolic::expression& exp, int64_t limit )
+	{
+		symbolic::expression out = exp;
+		transform_variables( out, [ & ] ( const symbolic::variable& var ) { return rtrace( var, limit ); } );
+		return out;
 	}
 };

@@ -93,61 +93,65 @@ namespace vtil::optimizer
 	template<typename T1, typename... Tx>
 	struct combine_pass<T1, Tx...> : pass_interface<>
 	{
-		T1 t1 = {};
-		combine_pass<Tx...> t2 = {};
 		size_t pass( basic_block* blk, bool xblock = false ) override
-		{ 
-			return t1.pass( blk, xblock ) + t2.pass( blk, xblock ); 
+		{
+			size_t n = T1{}.pass( blk, xblock );
+			n += combine_pass<Tx...>{}.pass( blk, xblock );
+			return n;
 		}
 		size_t xpass( routine* rtn ) override
-		{ 
-			return t1.xpass( rtn ) + t2.xpass( rtn ); 
+		{
+			size_t n = T1{}.xpass( rtn );
+			n += combine_pass<Tx...>{}.xpass( rtn );
+			return n;
 		}
-		std::string name() override { return "(" + t1.name() + " + " + t2.name() + ")"; }
+		std::string name() override { return "(" + T1{}.name() + " + " + combine_pass<Tx...>{}.name() + ")"; }
 	};
 
 	// Passes through first optimizer, if not no-op, passes through the rest.
 	//
 	template<typename T1, typename... Tx>
-	struct sequential_pass : pass_interface<>
+	struct conditional_pass : pass_interface<>
 	{
-		T1 entry_optimizer = {};
-		combine_pass<Tx...> sequential_optimizer = {};
 		size_t pass( basic_block* blk, bool xblock = false ) override
 		{
 			if ( !xblock )
 			{
-				size_t n = entry_optimizer.pass( blk, false );
-				if ( n ) n += sequential_optimizer.pass( blk, false );
+				size_t n = T1{}.pass( blk, false );
+				if ( n ) n += combine_pass<Tx...>{}.pass( blk, false );
 				return n;
 			}
-			return entry_optimizer.pass( blk, true );
+			return T1{}.pass( blk, true );
 		}
 		size_t xpass( routine* rtn ) override
 		{
-			size_t n = entry_optimizer.xpass( rtn );
-			if ( n ) n += sequential_optimizer.xpass( rtn );
+			size_t n = T1{}.xpass( rtn );
+			if ( n ) n += combine_pass<Tx...>{}.xpass( rtn );
 			return n;
 		}
-		std::string name() override { return "sequential{" + entry_optimizer.name() + " => " + sequential_optimizer.name() + "}"; }
+		std::string name() override { return "conditional{" + T1{}.name() + " => " + combine_pass<Tx...>{}.name() + "}"; }
 	};
 
 	// Passes through each optimizer provided until the passes do not change the block.
 	//
 	template<typename... Tx>
-	struct exhaust_pass : combine_pass<Tx...>
+	struct exhaust_pass : pass_interface<>
 	{
 		// Simple looping until pass returns 0.
 		//
 		size_t pass( basic_block* blk, bool xblock = false ) override
 		{ 
-			size_t cnt = combine_pass<Tx...>::pass( blk, xblock );
-			return cnt ? cnt + exhaust_pass::pass( blk, xblock ) : 0;
+			size_t cnt = 0;
+			while ( size_t n = combine_pass<Tx...>{}.pass( blk, xblock ) )
+				cnt += n;
+			return cnt;
 		}
 		size_t xpass( routine* rtn ) override
 		{
-			size_t cnt = combine_pass<Tx...>::xpass( rtn );
-			return cnt ? cnt + exhaust_pass::xpass( rtn ) : 0;
+			size_t cnt = 0;
+			while ( size_t n = combine_pass<Tx...>{}.xpass( rtn ) )
+				cnt += n;
+			return cnt;
 		}
 		std::string name() override { return "exhaust{" + combine_pass<Tx...>{}.name() + "}"; }
 	};
@@ -157,17 +161,15 @@ namespace vtil::optimizer
 	template<typename opt_lblock, typename opt_xblock>
 	struct specialize_pass : pass_interface<>
 	{
-		opt_xblock cross_optimizer = {};
-		opt_lblock local_optimizer = {};
 		size_t pass( basic_block* blk, bool xblock = false ) override
 		{
-			return xblock ? cross_optimizer.pass( blk, true ) : local_optimizer.pass( blk, false );
+			return xblock ? opt_xblock{}.pass( blk, true ) : opt_lblock{}.pass( blk, false );
 		}
 		size_t xpass( routine* rtn ) override
 		{
-			return cross_optimizer.xpass( rtn );
+			return opt_xblock{}.xpass( rtn );
 		}
-		std::string name() override { return "specialize{local=" + local_optimizer.name() + ", cross=" + cross_optimizer.name() + "}"; }
+		std::string name() override { return "specialize{local=" + opt_lblock{}.name() + ", cross=" + opt_xblock{}.name() + "}"; }
 	};
 
 	// Forces logic pass to ignore cross-block.
@@ -209,10 +211,18 @@ namespace vtil::optimizer
 		size_t operator()( routine* rtn ) const { return xpass( rtn ); }
 	};
 
+	// Dummy non-modifying wrapper.
+	//
+	template<typename T>
+	struct nop_wrap : T
+	{
+		std::string name() override { return T{}.name(); }
+	};
+
 	// Used to profile the pass.
 	//
 	template<typename T>
-	struct profile_pass : public T
+	struct profile_pass : T
 	{
 		size_t pass( basic_block* blk, bool xblock = false ) override
 		{
@@ -243,16 +253,19 @@ namespace vtil::optimizer
 		struct apply_each_opt_t { using type = modifier<compound>; };
 
 		template<template<typename...> typename modifier, typename... parts>
-		struct apply_each_opt_t<modifier, exhaust_pass<parts...>>    { using type =    exhaust_pass<typename apply_each_opt_t<modifier, parts>::type...>; };
+		struct apply_each_opt_t<modifier, spawn_state<parts...>>      { using type =     spawn_state<typename apply_each_opt_t<modifier, parts>::type...>;  };
 
 		template<template<typename...> typename modifier, typename... parts>
-		struct apply_each_opt_t<modifier, combine_pass<parts...>>    { using type =    combine_pass<typename apply_each_opt_t<modifier, parts>::type...>; };
+		struct apply_each_opt_t<modifier, exhaust_pass<parts...>>     { using type =    exhaust_pass<typename apply_each_opt_t<modifier, parts>::type...>;  };
 
 		template<template<typename...> typename modifier, typename... parts>
-		struct apply_each_opt_t<modifier, specialize_pass<parts...>> { using type = specialize_pass<typename apply_each_opt_t<modifier, parts>::type...>; };
+		struct apply_each_opt_t<modifier, combine_pass<parts...>>     { using type =    combine_pass<typename apply_each_opt_t<modifier, parts>::type...>;  };
 
 		template<template<typename...> typename modifier, typename... parts>
-		struct apply_each_opt_t<modifier, sequential_pass<parts...>> { using type = sequential_pass<typename apply_each_opt_t<modifier, parts>::type...>; };
+		struct apply_each_opt_t<modifier, specialize_pass<parts...>>  { using type = specialize_pass<typename apply_each_opt_t<modifier, parts>::type...>;  };
+
+		template<template<typename...> typename modifier, typename... parts>
+		struct apply_each_opt_t<modifier, conditional_pass<parts...>> { using type = conditional_pass<typename apply_each_opt_t<modifier, parts>::type...>; };
 	};
 
 	template<template<typename...> typename modifier, typename compound>

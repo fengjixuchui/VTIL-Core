@@ -35,50 +35,40 @@ namespace vtil::optimizer
 	//
 	struct lazy_tracer : cached_tracer
 	{
+		bool bypass = false;
+
 		symbolic::expression trace( symbolic::variable lookup ) override
 		{
-			size_t idx_special = lookup.at.container->last_temporary_index + 1;
+			if( bypass )
+				return cached_tracer::trace( std::move( lookup ) );
 
-			// If register:
+			// If iterator is at a str instruction and we're 
+			// looking up the stored operand, return without tracing.
 			//
-			if ( lookup.is_register() )
+			if ( !lookup.at.is_end() && *lookup.at->base == ins::str &&
+				 lookup.is_register() && lookup.at->operands[ 2 ].is_register() &&
+				 lookup.reg() == lookup.at->operands[ 2 ].reg() &&
+				 !lookup.reg().is_stack_pointer() )
 			{
-				// If stack pointer:
-				//
-				if ( lookup.reg().is_stack_pointer() )
-				{
-					// If index 0, return as is.
-					//
-					uint32_t sp_index = lookup.at.is_end() ? lookup.at.container->sp_index : lookup.at->sp_index;
-					if ( sp_index == 0 )
-						return symbolic::variable{ lookup.at.container->begin(), REG_SP }.to_expression();
-
-					// Otherwise, return unique pseudo-register per stack instance.
-					//
-					register_desc desc = {
-						register_local,
-						sp_index + idx_special,
-						lookup.reg().bit_count
-					};
-					return symbolic::variable{ lookup.at.container->begin(), desc }.to_expression();
-				}
-
-				// Otherwise, return without tracing.
-				//
-				if( !lookup.at.is_end() )
-					return lookup.to_expression();
+				return lookup.to_expression();
 			}
 
 			// Fallback to default tracer.
 			//
-			return cached_tracer::trace( std::move( lookup ) );
+			bypass = true;
+			auto result = cached_tracer::trace( std::move( lookup ) );
+			bypass = false;
+			return result;
 		}
 
 		symbolic::expression rtrace( symbolic::variable lookup, int64_t limit = -1 ) override
 		{
 			// Invoke default tracer and store the result.
 			//
-			symbolic::expression result = trace( std::move( lookup ) );
+			bool recursive_flag_prev = recursive_flag;
+			recursive_flag = true;
+			symbolic::expression result = cached_tracer::trace( std::move( lookup ) );
+			recursive_flag = recursive_flag_prev;
 			
 			// If result is a variable:
 			//
@@ -98,9 +88,19 @@ namespace vtil::optimizer
 	//
 	size_t stack_propagation_pass::pass( basic_block* blk, bool xblock )
 	{
-		size_t counter = 0;
+		// Acquire a shared lock.
+		//
+		cnd_shared_lock lock( mtx, xblock );
+
+		// Create tracers.
+		//
 		lazy_tracer ltracer = {};
 		cached_tracer ctracer = {};
+
+		// Allocate the swap buffers.
+		//
+		std::vector<std::tuple<il_iterator, const instruction_desc*, operand>> ins_swap_buffer;
+		std::vector<std::tuple<il_iterator, const instruction_desc*, symbolic::variable>> ins_revive_swap_buffer;
 
 		// => Begin a foward iterating query.
 		//
@@ -140,22 +140,13 @@ namespace vtil::optimizer
 
 				// Lazy-trace the value.
 				//
-				symbolic::pointer ptr = { ltracer( { it, REG_SP } ) + it->memory_location().second };
-				symbolic::variable var = { it, { ptr, bitcnt_t( it->access_size() * 8 ) } };
-				symbolic::expression exp = xblock ? ltracer.rtrace( var ) : ltracer.trace( var );
+				symbolic::pointer ptr = { ltracer.cached_tracer::trace_p( { it, REG_SP } ) + it->memory_location().second };
+				symbolic::variable var = { it, { ptr, it->access_size() } };
+				symbolic::expression exp = xblock ? ltracer.rtrace( var ) : ltracer.cached_tracer::trace( var );
 
 				// Resize and pack variables.
 				//
 				resize_and_pack( exp );
-
-				// If result is a non-convertable expression, try usual tracing.
-				//
-				if ( !is_convertable( exp ) )
-				{
-					var.mem().base = { ctracer( { it, REG_SP } ) + it->memory_location().second };
-					exp = xblock ? ctracer.rtrace( var ) : ctracer.trace( var );
-					resize_and_pack( exp );
-				}
 
 				// Determine the instruction we will use to move the source.
 				//
@@ -187,8 +178,9 @@ namespace vtil::optimizer
 				//
 				if ( auto imm = exp.get() )
 				{
-					it->base = new_instruction;
-					it->operands = { it->operands[ 0 ], operand{ *imm, exp.size() } };
+					// Push to swap buffer.
+					//
+					ins_swap_buffer.emplace_back( it, new_instruction, operand{ *imm, exp.size() } );
 				}
 				// Otherwise, try to replace with [mov reg, reg].
 				//
@@ -198,51 +190,69 @@ namespace vtil::optimizer
 				
 					// Skip if not a register or branch dependant.
 					//
-					symbolic::variable& var = exp.uid.get<symbolic::variable>();
-					if ( var.is_branch_dependant || !var.is_register() )
+					symbolic::variable& rvar = exp.uid.get<symbolic::variable>();
+					if ( rvar.is_branch_dependant || !rvar.is_register() )
 						return;
-					register_desc reg = var.reg();
+					register_desc reg = rvar.reg();
 
 					// If value is not alive, try hijacking the value declaration.
 					//
-					if ( !aux::is_alive( var, it, &ctracer ) )
+					if ( !aux::is_alive( rvar, it, xblock, &ctracer ) )
 					{
 						// Must be a valid (and non-end) iterator.
 						//
-						if ( var.at.is_end() )
+						if ( rvar.at.is_end() )
 						{
 							// If begin (begin&&end == invalid), fail.
 							//
-							if ( var.at.is_begin() )
+							if ( rvar.at.is_begin() )
 								return;
 
 							// Try determining the path to current block.
 							//
-							il_const_iterator it_rstr = var.at;
+							il_const_iterator it_rstr = rvar.at;
 							it_rstr.restrict_path( it.container, true );
 							std::vector<il_const_iterator> next = it_rstr.recurse( true );
 
 							// If single direction possible, replace iterator, otherwise fail.
 							//
 							if ( next.size() == 1 )
-								var.bind( next[ 0 ] );
+								rvar.bind( next[ 0 ] );
 							else
 								return;
 						}
-						reg = aux::revive_register( var, it );
+
+						// Push to swap buffer.
+						//
+						ins_revive_swap_buffer.emplace_back( it, new_instruction, rvar );
 					}
-
-					// Replace with a mov.
-					//
-					it->base = new_instruction;
-					it->operands = { it->operands[ 0 ], reg };
+					else
+					{
+						// Push to swap buffer.
+						//
+						ins_swap_buffer.emplace_back( it, new_instruction, operand{ reg } );
+					}
 				}
-
-				// Validate modification and increment counter.
-				//
-				fassert( it->is_valid() );
-				counter++;
 			});
-		return counter;
+
+
+		// Acquire lock and swap all instructions at once.
+		//
+		lock = {};
+		cnd_unique_lock _g( mtx, xblock );
+
+		for ( auto [it, ins, op] : ins_swap_buffer )
+		{
+			it->base = ins;
+			it->operands = { it->operands[ 0 ], op };
+			fassert( it->is_valid() );
+		}
+		for ( auto [it, ins, var] : ins_revive_swap_buffer )
+		{
+			it->base = ins;
+			it->operands = { it->operands[ 0 ], aux::revive_register( var, it ) };
+			fassert( it->is_valid() );
+		}
+		return ins_swap_buffer.size() + ins_revive_swap_buffer.size();
 	}
 };

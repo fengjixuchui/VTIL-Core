@@ -90,19 +90,18 @@ namespace vtil::optimizer
 				.bind( mask )
 				// := Unproject to iterator form.
 				.unproject()
-				// @ At every branch validate used-ness.
-				.run( [ & ] ( const il_iterator& i ) 
-				{ 
-					if( i->base->is_branching() && i.container->next.size() != 1 )
-						if( aux::is_used( src.bind( i ), xblock, &tracer ) )
-							fail();
-				} )
 				// >> Skip until value is overwritten.
 				.where( [ & ] ( const il_iterator& i ) 
 				{
+					// If we're at a branch, validate is_used again.
+					//
+					if ( i->base->is_branching() && i.container->next.size() != 1 )
+						if ( aux::is_used( src.bind( i ), xblock, &tracer ) )
+							return fail();
+
 					// If it does not access source, skip.
 					//
-					if ( auto details = src.accessed_by( i, &tracer ) )
+					if ( auto details = src.accessed_by( i, nullptr ) )
 					{
 						// If unknown access, fail.
 						//
@@ -118,13 +117,18 @@ namespace vtil::optimizer
 						//
 						if ( details.write && !details.read )
 							query::rlocal( mask ) &= ~math::fill( details.bit_count, details.bit_offset );
+
+						// If source is being accessed by a volatile instruction, fail.
+						//
+						if ( i->is_volatile() )
+							return fail();
 					}
 
 					// If destination is used by the instruction, fail.
 					// Can be ignored if mask is cleared.
 					//
-					if ( dst.accessed_by( i, &tracer ) && query::rlocal( mask ) )
-						fail();
+					if ( dst.accessed_by( i, nullptr ) && query::rlocal( mask ) )
+						return fail();
 
 					// Skip if mask is not cleared.
 					//
@@ -133,7 +137,7 @@ namespace vtil::optimizer
 
 					// If dst is used after this point, fail.
 					//
-					return aux::is_used( dst.bind( i ), xblock, &tracer ) ? fail() : true;
+					return aux::is_used( dst.bind( i ), xblock, nullptr ) ? fail() : true;
 				} )
 				.first();
 

@@ -30,25 +30,45 @@
 
 namespace vtil::optimizer
 {
-	// Ideal expression sizes.
-	//
-	static constexpr bitcnt_t prefered_exp_sizes[] = {
-		1, 8, 16, 32, 64
-	};
-
 	// Implement the pass.
 	//
-	size_t symbolic_rewrite_pass::pass( basic_block* blk, bool xblock )
+	size_t isymbolic_rewrite_pass::pass( basic_block* blk, bool xblock )
 	{
 		// Acquire shared mutex and create cached tracer.
 		//
 		std::shared_lock lock{ mtx };
 		cached_tracer ctracer = {};
 
+		// Determine the temporary sizes in the block.
+		//
+		std::map<std::pair<uint64_t, size_t>, bitcnt_t> temp_sizes;
+		for ( auto& ins : blk->stream )
+		{
+			for ( auto& op : ins.operands )
+			{
+				if ( op.is_register() && op.reg().is_local() )
+				{
+					bitcnt_t& sz = temp_sizes[ { op.reg().flags, op.reg().local_id } ];
+					sz = std::max( sz, op.reg().bit_count + op.reg().bit_offset );
+				}
+			}
+		}
+
 		// Create an instrumented symbolic virtual machine and hook execution to exit at 
 		// instructions that cannot be executed out-of-order.
 		//
 		lambda_vm<symbolic_vm> vm;
+		vm.hooks.size_register = [ & ] ( const register_desc& reg )
+		{
+			if ( auto it = temp_sizes.find( { reg.flags, reg.local_id } );
+				      it != temp_sizes.end() )
+			{
+				// Pick the minimum size from preferred sizes.
+				//
+				return it->second ? it->second : 64;
+			}
+			return 64;
+		};
 		vm.hooks.execute = [ & ] ( const instruction& ins )
 		{
 			// Halt if branching instruction.
@@ -72,13 +92,18 @@ namespace vtil::optimizer
 				if ( op.is_register() && op.reg().is_volatile() && !op.reg().is_undefined() )
 					return false;
 
-			// Halt if instruction writes to non [$sp + C] memory.
+			// Halt if instruction is accessing to non-restricted memory.
 			//
-			if ( ins.base->writes_memory() )
+			if ( ins.base->accesses_memory() )
 			{
-				auto [base, _] = ins.memory_location();
-				if ( !base.is_stack_pointer() && !( vm.read_register( base ) - symbolic::make_register_ex( REG_SP ) ).is_constant() )
-					return false;
+				auto [base, offset] = ins.memory_location();
+				if ( !symbolic::pointer::restricted_bases.contains( base ) )
+				{
+					auto ptr = vm.read_register( base ) + offset;
+					for ( auto& [k, v] : vm.memory_state )
+						if ( k.can_overlap( ptr ) && !( k - ptr ).has_value() )
+							return false;
+				}
 			}
 
 			// Invoke original handler.
@@ -94,10 +119,6 @@ namespace vtil::optimizer
 
 		for ( il_const_iterator it = blk->begin(); !it.is_end(); )
 		{
-			// Reset virtual machine state.
-			//
-			vm.reset();
-
 			// Execute starting from the instruction.
 			//
 			auto limit = vm.run( it, true );
@@ -141,40 +162,45 @@ namespace vtil::optimizer
 					}
 				}
 
-				// Try replacing A&B with __ucast(A, B).
+				// If partially inherited flags register:
 				//
-				v.transform( [ ] ( symbolic::expression& e )
+				if ( k.is_flags() && k.bit_count != 64 && prefered_exp_sizes.contains( 1 ) )
 				{
-					// Skip if not AND.
+					// For each bit:
 					//
-					if ( e.op != math::operator_id::bitwise_and )
-						return;
-
-					// If any of the sides have a constant, make sure it is at RHS.
-					//
-					if ( e.lhs->is_constant() )
-						std::swap( e.lhs, e.rhs );
-
-					// For each size:
-					//
-					for ( bitcnt_t size : prefered_exp_sizes )
+					for ( int i = 0; i < k.bit_count; i++ )
 					{
-						// If mask matches, resize and return.
+						// Skip if unchanged.
 						//
-						if ( e.rhs->equals( math::fill( size ) ) )
-						{
-							e = e.lhs->clone().resize( size );
-							break;
-						}
-					}
-				} );
+						auto subexp = __bt( v, i );
+						if ( subexp.equals( __bt( v0, i ) ) )
+							continue;
+						
+						// Pack registers and the expression.
+						//
+						auto sv = symbolic::variable::pack_all( subexp );
 
-				// TODO: Prefer bitwise mov for $flags.
+						// Buffer a mov instruction to the exact bit.
+						//
+						register_desc ks = k;
+						ks.bit_offset += i;
+						ks.bit_count = 1;
+						instruction_buffer.push_back( { &ins::mov, { ks, translator << sv } } );
+					}
+					continue;
+				}
+				
+				// Validate the register output.
 				//
+				fassert( !k.is_stack_pointer() && !k.is_read_only() );
+
+				// Pack registers and the expression.
+				//
+				v = symbolic::variable::pack_all( v.simplify( true ) );
 
 				// Buffer a mov instruction.
 				//
-				instruction_buffer.push_back( { &ins::mov, { k, translator << v.simplify( true ) } } );
+				instruction_buffer.push_back( { &ins::mov, { k, translator << v } } );
 			}
 
 			// For each memory state:
@@ -202,6 +228,10 @@ namespace vtil::optimizer
 					}
 				}
 
+				// Pack registers and the expression.
+				//
+				v = symbolic::variable::pack_all( v.simplify( true ) );
+
 				// If pointer can be rewritten as $sp + C:
 				//
 				operand base, offset, value;
@@ -212,12 +242,35 @@ namespace vtil::optimizer
 					instruction_buffer.push_back(
 					{
 						&ins::str,
-						{ REG_SP, make_imm<int64_t>( *displacement ), translator << v.simplify( true ) }
+						{ REG_SP, make_imm<int64_t>( *displacement ), translator << v }
 					} );
 				}
 				else
 				{
-					operand base = translator << k.base;
+					// Try to extract the offset from the compound expression.
+					//
+					int64_t offset = 0;
+					symbolic::expression exp = symbolic::variable::pack_all( k.base ).simplify( true );
+					if ( !exp.is_constant() )
+					{
+						using namespace symbolic::directive;
+
+						std::vector<symbol_table_t> results;
+						if ( fast_match( &results, A + U, exp ) )
+						{
+							exp = *results.front().translate( A );
+							offset = *results.front().translate( U )->get<int64_t>();
+						}
+						else if ( fast_match( &results, A - U, exp ) )
+						{
+							exp = *results.front().translate( A );
+							offset = -*results.front().translate( U )->get<int64_t>();
+						}
+					}
+
+					// Translate the base address.
+					//
+					operand base = translator << exp;
 					if ( base.is_immediate() )
 					{
 						operand tmp = temporary_block.tmp( base.bit_count() );
@@ -230,7 +283,7 @@ namespace vtil::optimizer
 					instruction_buffer.push_back(
 					{
 						&ins::str,
-						{ base, make_imm<int64_t>( 0 ), translator << v.simplify( true ) }
+						{ base, make_imm( offset ), translator << v }
 					} );
 				}
 			}
@@ -249,13 +302,20 @@ namespace vtil::optimizer
 				it = std::next( limit );
 				temporary_block.sp_index = it.is_end() ? blk->sp_index : it->sp_index;
 			}
+
+			// Reset virtual machine state.
+			//
+			vm.reset();
 		}
 
 		// Skip rewriting if we produced larger code.
 		//
 		int64_t opt_count = blk->stream.size() - temporary_block.stream.size();
 		if ( opt_count <= 0 )
-			return 0;
+		{
+			if ( !force ) return 0;
+			opt_count = 0;
+		}
 
 		// Acquire a unique lock and rewrite the stream. Purge simplifier cache since block 
 		// iterators are now invalidated making the cache also invalid.

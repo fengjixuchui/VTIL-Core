@@ -52,7 +52,8 @@ namespace vtil::optimizer
 	{
 		size_t counter = 0;
 
-		if ( !xblock ) ctrace.flush();
+		if ( blk->stream.empty() )
+			return 0;
 
 		auto [rbegin, rend] = reverse_iterators( *blk );
 		for ( auto it = rbegin; it != rend; ++it )
@@ -92,7 +93,7 @@ namespace vtil::optimizer
 					if ( !( ptr.flags & register_stack_pointer ) )
 						used = true;
 					else
-						used = aux::is_used( { it, {  ptr, ( bitcnt_t ) it->access_size() * 8 } }, xblock, &ctrace );
+						used = aux::is_used( { it, {  ptr, it->access_size() } }, xblock, &ctrace );
 				}
 			}
 

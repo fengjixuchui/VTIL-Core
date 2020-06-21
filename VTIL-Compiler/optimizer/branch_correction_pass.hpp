@@ -26,16 +26,24 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include "interface.hpp"
+#include <vtil/arch>
+#include <shared_mutex>
+#include "../common/interface.hpp"
 
 namespace vtil::optimizer
 {
-	// TODO: Add a wrapping validation pass and validated_t<T> to nop | apply depending on _DEBUG.
+	// This pass serves two purposes:
+	// 1) Eliminates each prev-next link where the jump is not possible after
+	//    the elimination of opaque predicates, removes the entire block if
+	//    it was left without any references.
+	// 2) Converts jmps to jccs where it can be inferred.
 	//
+	struct branch_correction_pass : pass_interface<>
+	{
+		std::shared_mutex mutex;
+		cached_tracer ctracer = {};
 
-	// Combined pass for each optimization.
-	// TODO: Add final optimizers...
-	//
-	using combined_pass_type = combine_pass<nop_pass/*stack_normalization_pass, dead_elimination_pass*/>;
-	static constexpr spawn_state<combined_pass_type> apply_all = {};
+		size_t pass( basic_block* blk, bool xblock = false ) override;
+		size_t xpass( routine* rtn ) override;
+	};
 };

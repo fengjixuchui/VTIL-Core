@@ -31,12 +31,10 @@
 
 namespace vtil::optimizer
 {
-	// Removes every non-volatile instruction whose effects are
-	// ignored or overwritten.
+	// Attempts to merge the value of REG_SP accross the block.
 	//
-	struct dead_code_elimination_pass : pass_interface<true>
+	struct stack_pinning_pass : pass_interface<>
 	{
-		cached_tracer ctrace;
 		std::set<basic_block*> visited;
 
 		size_t pass( basic_block* blk, bool xblock = false ) override;
@@ -56,8 +54,6 @@ namespace vtil::optimizer
 		}
 		size_t xpass( routine* rtn ) override
 		{
-			ctrace.flush();
-			visited.clear();
 			return cpass( rtn->entry_point );
 		}
 	};

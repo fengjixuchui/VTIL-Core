@@ -31,10 +31,12 @@
 
 namespace vtil::optimizer
 {
-	// Attempts to merge the value of REG_SP accross the block.
+	// Attempts to resolve all loads from stack where the value can be 
+	// determined during compile time.
 	//
-	struct stack_pinning_pass : pass_interface<>
+	struct stack_propagation_pass : pass_interface<>
 	{
+		std::shared_mutex mtx;
 		size_t pass( basic_block* blk, bool xblock = false ) override;
 	};
 };

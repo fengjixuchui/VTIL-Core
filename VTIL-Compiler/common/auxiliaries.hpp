@@ -26,22 +26,46 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
+#include <vtil/symex>
 #include <vtil/arch>
-#include <shared_mutex>
-#include "../common/interface.hpp"
 
-namespace vtil::optimizer
+namespace vtil::optimizer::aux
 {
-	// Eliminates each prev-next link where the jump is not possible after
-	// the elimination of opaque predicates, removes the entire block if
-	// it was left without any references.
+	// Simple structure describing branch details.
 	//
-	struct opaque_predicate_elimination_pass : pass_interface<>
+	struct branch_info
 	{
-		std::mutex mtx;
-		cached_tracer ctracer = {};
+		// If jump to real:
+		//
+		bool is_vm_exit = false;
+		
+		// If jcc:
+		//
+		bool is_jcc = false;
+		symbolic::expression cc;
 
-		size_t pass( basic_block* blk, bool xblock = false ) override;
-		size_t xpass( routine* rtn ) override;
+		// Possible destination expressions:
+		//
+		std::vector<symbolic::expression> destinations;
 	};
-};
+
+	// Helper to check if the expression given is block-local.
+	//
+	bool is_local( const symbolic::expression& ex );
+
+	// Helper to check if the current value stored in the variable is used by the routine.
+	//
+	bool is_used( const symbolic::variable& var, bool rec, tracer* tracer );
+
+	// Helper to check if the given symbolic variable's value is preserved upto [dst].
+	//
+	bool is_alive( const symbolic::variable& var, const il_const_iterator& dst, bool rec, tracer* tracer );
+
+	// Revives the value of the given variable to be used by the point specified.
+	//
+	register_desc revive_register( const symbolic::variable& var, const il_iterator& it );
+
+	// Extracts the details of the branch taken at the end of the block where possible.
+	//
+	branch_info analyze_branch( const basic_block* blk, tracer* tracer, bool xblock, bool pack = true );
+}

@@ -16,6 +16,9 @@
     <ClCompile Include="directives\transformer.cpp">
       <Filter>Directives</Filter>
     </ClCompile>
+    <ClCompile Include="simplifier\boolean_directives.cpp">
+      <Filter>Simplifier</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="directives\directive.hpp">
@@ -41,6 +44,9 @@
     </ClInclude>
     <ClInclude Include="directives\transformer.hpp">
       <Filter>Directives</Filter>
+    </ClInclude>
+    <ClInclude Include="simplifier\boolean_directives.hpp">
+      <Filter>Simplifier</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

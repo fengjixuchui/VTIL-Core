@@ -25,11 +25,10 @@
 // ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE  
 // POSSIBILITY OF SUCH DAMAGE.        
 //
+#include "../io/logger.hpp"
 #include "operators.hpp"
 #include "../util/mul128.hpp"
 
-#pragma warning(push)
-#pragma warning(disable: 4244)
 namespace vtil::math
 {
     // Calculates the size of the result after after the application of the operator [id] on the operands.
@@ -84,6 +83,8 @@ namespace vtil::math
     //
     std::pair<uint64_t, bitcnt_t> evaluate( operator_id id, bitcnt_t bcnt_lhs, uint64_t lhs, bitcnt_t bcnt_rhs, uint64_t rhs )
     {
+        using namespace logger;
+
         // Normalize the input.
         //
         const operator_desc* desc = descriptor_of( id );
@@ -100,9 +101,9 @@ namespace vtil::math
         // Handle __cast and __ucast.
         //
         if ( id == operator_id::ucast )
-            return { zero_extend( lhs, rhs ), rhs };
+            return { zero_extend( lhs, math::narrow_cast<bitcnt_t>( rhs ) ), math::narrow_cast<bitcnt_t>( rhs ) };
         if ( id == operator_id::cast )
-            return { sign_extend( lhs, rhs ), rhs };
+            return { sign_extend( lhs, math::narrow_cast<bitcnt_t>( rhs ) ), math::narrow_cast<bitcnt_t>( rhs ) };
 
         // Calculate the result of the operation.
         //
@@ -135,11 +136,15 @@ namespace vtil::math
                                                         : ( lhs * rhs ) >> bcnt_res;                                break;
             case operator_id::multiply:         result = ilhs * irhs;                                               break;
             case operator_id::umultiply:        result = lhs * rhs;                                                 break;
-            case operator_id::divide:           result = ilhs / irhs;                                               break;
-            case operator_id::udivide:          result = lhs / rhs;                                                 break;
-            case operator_id::remainder:        result = ilhs % irhs;                                               break;
-            case operator_id::uremainder:       result = lhs % rhs;                                                 break;
 
+            case operator_id::divide:           if( irhs == 0 ) result = INT64_MAX, warning("Division by immediate zero (IDIV).");
+                                                else            result = ilhs / irhs;                               break;
+            case operator_id::udivide:          if( rhs == 0 )  result = UINT64_MAX, warning("Division by immediate zero (DIV).");
+                                                else            result = lhs / rhs;                                 break;
+            case operator_id::remainder:        if( irhs == 0 ) result = 0, warning("Division by immediate zero (IREM).");
+                                                else            result = ilhs % irhs;                               break;
+            case operator_id::uremainder:       if( rhs == 0 )  result = 0, warning("Division by immediate zero (REM).");
+                                                else            result = lhs % rhs;                                 break;
             // - Special operators.                                                          
             //                                                                                  
             case operator_id::popcnt:           result = popcnt( rhs );                                             break;
@@ -432,13 +437,13 @@ namespace vtil::math
             case operator_id::ucast:
                 // Get new size from RHS as constant, and resize LHS to be of size [RHS] with zero extension if relevant.
                 //
-                if ( auto new_size = rhs.get() )  return bit_vector( lhs ).resize( *new_size, false );
+                if ( auto new_size = rhs.get() )  return bit_vector( lhs ).resize( math::narrow_cast<bitcnt_t>( *new_size ), false );
                 else                              unreachable();
 
             case operator_id::cast:
                 // Get new size from RHS as constant, and resize LHS to be of size [RHS] with sign extension if relevant.
                 //
-                if ( auto new_size = rhs.get() )  return bit_vector( lhs ).resize( *new_size, true );
+                if ( auto new_size = rhs.get() )  return bit_vector( lhs ).resize( math::narrow_cast<bitcnt_t>( *new_size ), true );
                 else                              unreachable();
 
             case operator_id::popcnt:
@@ -678,4 +683,3 @@ namespace vtil::math
         unreachable();
     }
 };
-#pragma warning(pop)

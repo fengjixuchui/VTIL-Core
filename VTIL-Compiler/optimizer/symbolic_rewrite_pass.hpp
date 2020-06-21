@@ -35,9 +35,22 @@ namespace vtil::optimizer
 	// Attempts to execute ranges of the given block in a symbolic virtual machine
 	// to automatically simplify expressions created by the instructions where possible.
 	//
-	struct symbolic_rewrite_pass : pass_interface<>
+	struct isymbolic_rewrite_pass : pass_interface<>
 	{
 		std::shared_mutex mtx;
+
+		bool force;
+		std::set<bitcnt_t> prefered_exp_sizes;
+		isymbolic_rewrite_pass( bool force, const std::set<bitcnt_t>& prefered_exp_sizes = { 1, 8, 16, 32, 64 } )
+			: force( force ), prefered_exp_sizes( prefered_exp_sizes ) {}
+
 		size_t pass( basic_block* blk, bool xblock ) override;
+	};
+
+	template<bool force>
+	struct symbolic_rewrite_pass : pass_interface<>
+	{
+		size_t pass( basic_block* blk, bool xblock = false ) override { return isymbolic_rewrite_pass{ force }.pass( blk, xblock ); }
+		size_t xpass( routine* rtn ) override { return isymbolic_rewrite_pass{ force }.xpass( rtn ); }
 	};
 };

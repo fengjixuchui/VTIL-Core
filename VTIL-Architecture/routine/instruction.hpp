@@ -73,16 +73,18 @@ namespace vtil
 		//
 		bool explicit_volatile = false;
 
+		// Multivariate runtime context.
+		//
+		mutable multivariate context = {};
+
 		// Basic constructor, non-default constructor asserts the constructed
 		// instruction is valid according to the instruction descriptor.
 		//
 		instruction() = default;
 		instruction( const instruction_desc* base,
 					 const std::vector<operand>& operands = {},
-					 vip_t vip = invalid_vip,
 					 bool explicit_volatile = false ) :
-			base( base ), operands( operands ),
-			vip( vip ), explicit_volatile( explicit_volatile )
+			base( base ), operands( operands ), explicit_volatile( explicit_volatile )
 		{
 			fassert( is_valid() );
 		}
@@ -104,9 +106,9 @@ namespace vtil
 		//
 		bool is_volatile() const { return explicit_volatile || base->is_volatile; }
 
-		// Returns the access size of the instruction.
+		// Returns the access size of the instruction in number of bits.
 		//
-		size_t access_size() const { return operands.empty() ? 0 : operands[ base->access_size_index ].size(); }
+		bitcnt_t access_size() const { return operands.empty() ? 0 : operands[ base->access_size_index ].bit_count(); }
 
 		// Returns the memory location this instruction references.
 		//

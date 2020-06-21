@@ -93,15 +93,28 @@ namespace vtil::optimizer
 	//
 	size_t mov_propagation_pass::pass( basic_block* blk, bool xblock )
 	{
+		// Acquire a shared lock.
+		//
 		cnd_shared_lock lock( mtx, xblock );
 
+		// Create tracers.
+		//
+		cached_tracer ctracer = {};
 		mov_tracer mtracer = {};
+		
+		// Allocate the swap buffer.
+		//
 		std::vector<std::pair<operand*, operand>> operand_swap_buffer;
 
 		// Iterate each instruction:
 		//
 		for ( auto it = blk->begin(); it != blk->end(); it++ )
 		{
+			// Skip if volatile.
+			//
+			if ( it->is_volatile() )
+				continue;
+
 			// Enumerate each operand:
 			//
 			for ( auto [op, type] : it->enum_operands() )
@@ -150,23 +163,15 @@ namespace vtil::optimizer
 					if ( reg.is_stack_pointer() || reg == op.reg() )
 						continue;
 
-					// Skip if value is dead, otherwise replace operand.
+					// Skip if value is dead.
 					//
-					{
-						cached_tracer ctracer = {};
-						if ( !aux::is_alive( var, it, &ctracer ) )
-							continue;
-					}
+					if ( !aux::is_alive( var, it, xblock, &ctracer ) )
+						continue;
+
+					// Push to swap buffer.
+					//
 					operand_swap_buffer.emplace_back( &op, operand{ var.reg() } );
 				}
-
-				// Validate modification and increment counter.
-				//
-				fassert( it->is_valid() );
-
-				// Flush mov tracer cache
-				//
-				mtracer.flush();
 			}
 		}
 
@@ -175,7 +180,10 @@ namespace vtil::optimizer
 		lock = {};
 		cnd_unique_lock _g( mtx, xblock );
 		for ( auto [dst, op] : operand_swap_buffer )
+		{
 			*dst = op;
+			fassert( dst->is_valid() );
+		}
 		return operand_swap_buffer.size();
 	}
 };

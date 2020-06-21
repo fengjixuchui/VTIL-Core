@@ -27,9 +27,11 @@
 //
 #pragma once
 #include <string>
+#include <cstring>
 #include <type_traits>
 #include "../util/concept.hpp"
 #include "../util/lt_typeid.hpp"
+#include "../util/dynamic_size.hpp"
 
 // [Configuration]
 // Determine the way we format the instructions.
@@ -158,6 +160,8 @@ namespace vtil::format
 	template<typename T>
 	static std::string as_string( T&& x )
 	{
+		using base_type = std::decay_t<T>;
+
 		if constexpr ( impl::std_to_string<T>::apply() )
 		{
 			return std::to_string( x );
@@ -165,6 +169,19 @@ namespace vtil::format
 		else if constexpr ( impl::has_to_string<T>::apply() )
 		{
 			return x.to_string();
+		}
+		else if constexpr ( std::is_same_v<base_type, std::string> || 
+							std::is_same_v<base_type, const char*> )
+		{
+			return x;
+		}
+		else if constexpr ( std::is_same_v<base_type, std::wstring> )
+		{
+			return std::string( x.begin(), x.end() );
+		}
+		else if constexpr ( std::is_same_v<base_type, const wchar_t*> )
+		{
+			return as_string( std::wstring{ x } );
 		}
 		else
 		{
@@ -204,6 +221,19 @@ namespace vtil::format
 			else
 				return impl::buffer_string( std::move( x ) );
 		}
+		// If container:
+		//
+		else if constexpr ( is_random_access_v<T> )
+		{
+			size_t n = dynamic_size( x );
+			std::string result = "{";
+			for ( size_t i = 0; i < n; i++ )
+			{
+				result += as_string( deref_n( x, i ) );
+				if ( ( i + 1 ) != n ) result += ", ";
+			}
+			return impl::buffer_string( result + "}" );
+		}
 		// If none matched, forcefully convert into [type @ pointer].
 		//
 		else
@@ -228,20 +258,23 @@ namespace vtil::format
 	template<typename T, std::enable_if_t<std::is_integral_v<std::remove_cvref_t<T>>, int> = 0>
 	static std::string hex( T&& value )
 	{
-		if ( !std::is_signed_v<std::remove_cvref_t<T>> || value >= 0 )
+		if constexpr ( !std::is_signed_v<std::remove_cvref_t<T>> )
+		{
 			return str( "0x%llx", value );
+		}
 		else
-			return str( "-0x%llx", -value );
+		{
+			if ( value >= 0 ) return str( "0x%llx", value );
+			else              return str( "-0x%llx", -value );
+		}
 	}
 
 	// Formats the integer into a signed hexadecimal with explicit + if positive.
 	//
 	static std::string offset( int64_t value )
 	{
-		if ( value >= 0 )
-			return str( "+ 0x%llx", value );
-		else
-			return str( "- 0x%llx", -value );
+		if ( value >= 0 ) return str( "+ 0x%llx", value );
+		else              return str( "- 0x%llx", -value );
 	}
 };
 #undef HAS_RTTI

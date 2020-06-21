@@ -68,7 +68,7 @@ namespace vtil::symbolic
 
 	// Calculates the displacement between two pointers and fills the access_details accordingly.
 	//
-	static void fill_displacement( access_details* details, const pointer& p1, const pointer& p2, tracer* tracer )
+	static void fill_displacement( access_details* details, const pointer& p1, const pointer& p2, tracer* tracer, bool xblock )
 	{
 		// If valid tracer provided:
 		//
@@ -144,7 +144,7 @@ namespace vtil::symbolic
 
 				// Recurse with the new pointers.
 				//
-				return fill_displacement( details, pn1, pn2, nullptr );
+				return fill_displacement( details, pn1, pn2, nullptr, xblock );
 			}
 		}
 
@@ -154,10 +154,28 @@ namespace vtil::symbolic
 		if ( p1.can_overlap( p2 ) )
 		{
 			details->bit_count = -1;
+
+			// If offset is constant:
+			//
 			if ( auto disp = p1 - p2 )
-				details->bit_offset = ( bitcnt_t ) *disp * 8;
+			{
+				details->bit_offset = math::narrow_cast< bitcnt_t >( *disp * 8 );
+			}
+			// If pointer does not strictly overlap and cross-block and tracer 
+			// is given, try again after cross-tracing.
+			//
+			else if ( xblock && tracer && !p1.can_overlap_s( p2 ) )
+			{
+				pointer p1r = { tracer->rtrace_exp( p1.base ) };
+				pointer p2r = { tracer->rtrace_exp( p2.base ) };
+				return fill_displacement( details, p1r, p2r, nullptr, false );
+			}
+			// If all fails, declare unknown.
+			//
 			else
-				details->bit_offset = -1;
+			{
+				details->unknown = 1;
+			}
 		}
 		// Otherwise declare no-overlap.
 		//
@@ -170,7 +188,7 @@ namespace vtil::symbolic
 
 	// Implement generic access check for ::read_by & ::written_by, write and read must not be both set to true.
 	//
-	static access_details test_access( const variable& var, const il_const_iterator& it, tracer* tracer, bool write, bool read )
+	static access_details test_access( const variable& var, const il_const_iterator& it, tracer* tracer, bool write, bool read, bool xblock )
 	{
 		fassert( !( write && read ) );
 
@@ -202,7 +220,7 @@ namespace vtil::symbolic
 
 				// Return access details.
 				//
-				return access_details{
+				return {
 					.bit_offset = ref_reg.bit_offset - reg->bit_offset,
 					.bit_count = ref_reg.bit_count,
 					.read = it->base->operand_types[ i ] != operand_type::write,
@@ -216,46 +234,42 @@ namespace vtil::symbolic
 		{
 			// If instruction accesses memory:
 			//
-			if ( it->base->accesses_memory() )
+			if ( ( write && it->base->writes_memory() ) ||
+				 ( read && it->base->reads_memory() ) ||
+				 ( !read && !write && it->base->accesses_memory() ) )
 			{
-				// If access type matches:
+				// Generate an expression for the pointer.
 				//
-				if ( ( write && it->base->writes_memory() ) ||
-					 ( read && !it->base->writes_memory() ) )
+				auto [base, offset] = it->memory_location();
+				pointer ptr = { tracer->trace( { it, base } ) + offset };
+
+				// Calculate displacement.
+				//
+				access_details details;
+				fill_displacement( &details, ptr, mem->base, tracer, xblock );
+
+				// If pointers can indeed overlap:
+				//
+				if ( details )
 				{
-					// Generate an expression for the pointer.
+					// Fill read/write.
 					//
-					auto [base, offset] = it->memory_location();
-					pointer ptr = { tracer->trace( { it, base } ) + offset };
+					details.read = it->base->reads_memory();
+					details.write = it->base->writes_memory();
 
-					// Calculate displacement.
+					// If offset is unknown, return as is.
 					//
-					access_details details;
-					fill_displacement( &details, ptr, mem->base, tracer );
+					if ( details.is_unknown() )
+						return details;
 
-					// If pointers can indeed overlap:
+					// Check if within boundaries, set bit count and return if so.
 					//
-					if ( details )
+					bitcnt_t low_offset = details.bit_offset;
+					bitcnt_t high_offset = low_offset + it->access_size();
+					if ( low_offset < mem->bit_count && high_offset > 0 )
 					{
-						// Fill read/write.
-						//
-						details.read = !it->base->writes_memory();
-						details.write = it->base->writes_memory();
-
-						// If offset is unknown, return as is.
-						//
-						if ( details.is_unknown() )
-							return details;
-
-						// Check if within boundaries, set bit count and return if so.
-						//
-						bitcnt_t low_offset = details.bit_offset;
-						bitcnt_t high_offset = low_offset + ( bitcnt_t ) it->access_size() * 8;
-						if ( low_offset < mem->bit_count && high_offset > 0 )
-						{
-							details.bit_count = ( bitcnt_t ) it->access_size() * 8;
-							return details;
-						}
+						details.bit_count = it->access_size();
+						return details;
 					}
 				}
 			}
@@ -285,7 +299,7 @@ namespace vtil::symbolic
 					{
 						if ( retval.overlaps( reg ) )
 						{
-							return access_details{
+							return {
 								.bit_offset = retval.bit_offset - reg.bit_offset,
 								.bit_count = retval.bit_count,
 								.read = true, 
@@ -301,9 +315,9 @@ namespace vtil::symbolic
 						if ( retval.overlaps( reg ) )
 						{
 							if ( !read )
-								return access_details{ .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
+								return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
 							else
-								return access_details{ .bit_count = 0, .read = false, .write = false };
+								return {};
 						}
 					}
 
@@ -312,14 +326,14 @@ namespace vtil::symbolic
 					if ( reg.is_virtual() )
 					{
 						if ( !read )
-							return access_details{ .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
+							return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
 						else
-							return access_details{ .bit_count = 0, .read = false, .write = false };
+							return {};
 					}
 
 					// Otherwise indicate read from.
 					//
-					return access_details{
+					return {
 						.bit_offset = 0,
 						.bit_count = reg.bit_count,
 						.read = true,
@@ -329,7 +343,7 @@ namespace vtil::symbolic
 
 				// If not only looking for read access, check if register is written to.
 				//
-				access_details wdetails = { .bit_count = 0 };
+				access_details wdetails = {};
 				if ( !read )
 				{
 					for ( const register_desc& param : cc.volatile_registers )
@@ -356,7 +370,7 @@ namespace vtil::symbolic
 
 				// If not only looking for write access, check if register is read from.
 				//
-				access_details rdetails = { .bit_count = 0 };
+				access_details rdetails = {};
 				if ( !write )
 				{
 					for ( const register_desc& param : cc.param_registers )
@@ -375,7 +389,7 @@ namespace vtil::symbolic
 				//
 				if ( !wdetails ) return rdetails;
 				if ( !rdetails ) return wdetails;
-				return access_details{
+				return {
 					.bit_offset = std::min( wdetails.bit_offset, rdetails.bit_offset ),
 					.bit_count = std::max( wdetails.bit_count, rdetails.bit_count ),
 					.read = true,
@@ -402,25 +416,26 @@ namespace vtil::symbolic
 					// Calculate the displacement, if constant below 0, declare trashed.
 					//
 					access_details details;
-					fill_displacement( &details, mem.base, pointer{ limit }, tracer );
+					fill_displacement( &details, mem.base, pointer{ limit }, tracer, xblock );
 					if ( !details.is_unknown() && ( details.bit_offset + var.bit_count() ) <= 0 )
 					{
 						if ( !read )
-							return access_details{ .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
+							return { .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
 						else
-							return access_details{ .bit_count = 0, .read = false, .write = false };
+							return {};
 					}
 				}
 
 				// Report unknown access: (TODO: Proper parsing!)
-				// - We can estimate usage based on 
-				return access_details{ .bit_offset = -1, .bit_count = -1 };
+				// - We can estimate usage based on registers passed, maybe?
+				//
+				return { .bit_count = var.bit_count(), .unknown = true };
 			}
 		}
 
 		// No access case.
 		//
-		return access_details{ .bit_count = 0, .read = false, .write = false };
+		return {};
 	}
 
 	// Constructs by iterator and the variable descriptor itself.
@@ -693,22 +708,22 @@ namespace vtil::symbolic
 	// access details as described by access_details. Tracer is used for
 	// pointer resolving, if nullptr passed will use default tracer.
 	//
-	access_details variable::read_by( const il_const_iterator& it, tracer* tr ) const
+	access_details variable::read_by( const il_const_iterator& it, tracer* tr, bool xblock ) const
 	{
 		tracer default_tracer;
 		if ( !tr ) tr = &default_tracer;
-		return test_access( *this, it, tr ? tr : &default_tracer, false, true );
+		return test_access( *this, it, tr ? tr : &default_tracer, false, true, xblock );
 	}
-	access_details variable::written_by( const il_const_iterator& it, tracer* tr ) const
+	access_details variable::written_by( const il_const_iterator& it, tracer* tr, bool xblock ) const
 	{
 		tracer default_tracer;
 		if ( !tr ) tr = &default_tracer;
-		return test_access( *this, it, tr ? tr : &default_tracer, true, false );
+		return test_access( *this, it, tr ? tr : &default_tracer, true, false, xblock );
 	}
-	access_details variable::accessed_by( const il_const_iterator& it, tracer* tr ) const
+	access_details variable::accessed_by( const il_const_iterator& it, tracer* tr, bool xblock ) const
 	{
 		tracer default_tracer;
 		if ( !tr ) tr = &default_tracer;
-		return test_access( *this, it, tr ? tr : &default_tracer, false, false );
+		return test_access( *this, it, tr ? tr : &default_tracer, false, false, xblock );
 	}
 };

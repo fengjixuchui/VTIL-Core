@@ -33,30 +33,37 @@ namespace vtil
 	//
 	symbolic::expression symbolic_vm::read_register( const register_desc& desc )
 	{
-		register_desc full = { desc.flags, desc.local_id, 64, 0 };
+		bitcnt_t size = size_register( desc );
+		register_desc full = { desc.flags, desc.local_id, size, 0 };
 
 		auto it = register_state.find( full );
 		if ( it == register_state.end() )
-			return symbolic::make_register_ex( desc, true );
-		else
-			return ( it->second >> desc.bit_offset ).resize( desc.bit_count );
+		{
+			symbolic::expression exp = symbolic::variable{ full }.to_expression( false );
+			if ( desc.bit_offset ) exp = exp >> desc.bit_offset;
+			return exp.resize( desc.bit_count );
+		}
+
+		return ( it->second >> desc.bit_offset ).resize( desc.bit_count );
 	}
 
 	// Writes to the register.
 	//
 	void symbolic_vm::write_register( const register_desc& desc, symbolic::expression value )
 	{
-		if ( desc.bit_count == 64 && desc.bit_offset == 0 )
+		bitcnt_t size = size_register( desc );
+		register_desc full = { desc.flags, desc.local_id, size, 0 };
+
+		if ( desc.bit_count == size && desc.bit_offset == 0 )
 		{
 			register_state.erase( desc );
 			register_state.emplace( desc, std::move( value ) );
 		}
 		else
 		{
-			register_desc full = { desc.flags, desc.local_id, 64, 0 };
 			auto& exp = register_state[ full ];
 			if ( !exp ) exp = symbolic::make_register_ex( full );
-			exp = ( exp & ~desc.get_mask() ) | ( value.resize( desc.bit_count ).resize( 64 ) << desc.bit_offset );
+			exp = ( exp & ~desc.get_mask() ) | ( value.resize( desc.bit_count ).resize( size ) << desc.bit_offset );
 		}
 	}
 
@@ -64,7 +71,7 @@ namespace vtil
 	//
 	symbolic::expression symbolic_vm::read_memory( const symbolic::expression& pointer, size_t byte_count )
 	{
-		bitcnt_t bcnt = byte_count * 8;
+		bitcnt_t bcnt = math::narrow_cast<bitcnt_t>( byte_count * 8 );
 		return memory_state.read_v( pointer, bcnt );
 	}
 

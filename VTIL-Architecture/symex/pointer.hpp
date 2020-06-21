@@ -110,13 +110,14 @@ namespace vtil::symbolic
 		// are checking "is overlapping" instead.
 		//
 		bool can_overlap( const pointer& o ) const;
+		
+		// Same as can_overlap but will return false if flags do not overlap.
+		//
+		bool can_overlap_s( const pointer& o ) const;
 
 		// Conversion to human-readable format.
 		//
-		std::string to_string() const
-		{
-			return base.to_string();
-		}
+		std::string to_string() const { return base.to_string(); }
 
 		// Define reduction.
 		//

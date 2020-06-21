@@ -210,12 +210,37 @@ namespace vtil::symbolic
 				}
 				break;
 
+			// If not:
+			//
+			case math::operator_id::bitwise_not:
+				if ( !signed_cast )
+				{
+					// If shrinking, just resize.
+					//
+					if ( new_size < value.size() )
+					{
+						if ( rhs->size() != new_size ) ( +rhs )->resize( new_size, false );
+					}
+					// If extending:
+					//
+					else
+					{
+						uint64_t rhs_mask = value.known_one() | value.unknown_mask();
+						auto rhs_v = std::move( rhs );
+						*this = ( ~( ( +rhs_v )->resize( new_size, false ) ) ) & expression{ rhs_mask, new_size };
+					}
+				}
+				else
+				{
+					*this = __cast( *this, new_size );
+				}
+				break;
+
 			// If basic unsigned operation, unsigned cast both sides if requested type is also unsigned.
 			//
 			case math::operator_id::bitwise_and:
 			case math::operator_id::bitwise_or:
 			case math::operator_id::bitwise_xor:
-			case math::operator_id::bitwise_not:
 			case math::operator_id::umultiply:
 			case math::operator_id::udivide:
 			case math::operator_id::uremainder:
@@ -447,8 +472,20 @@ namespace vtil::symbolic
 
 				// Handle size mismatches.
 				//
+				const auto optimistic_size = [ ] ( symbolic::expression::reference& lhs,
+												   symbolic::expression::reference& rhs )
+				{
+
+					bitcnt_t op_size = lhs->size();
+					if ( ( op_size < rhs->size() && math::msb( ~rhs->value.known_zero() ) > op_size ) ||
+						 ( op_size > rhs->size() && math::msb( ~lhs->value.known_zero() ) < rhs->size() ) )
+						op_size = rhs->size();
+					return op_size;
+				};
+
 				switch ( op )
 				{
+					
 					case math::operator_id::bitwise_and:
 					case math::operator_id::bitwise_or:
 					case math::operator_id::bitwise_xor:
@@ -477,7 +514,7 @@ namespace vtil::symbolic
 					case math::operator_id::uless_eq:
 					case math::operator_id::uless:
 					{
-						bitcnt_t op_size = std::max( lhs->size(), rhs->size() );
+						bitcnt_t op_size = optimistic_size( lhs, rhs );
 						if ( lhs->size() != op_size ) ( +lhs )->resize( op_size, false );
 						if ( rhs->size() != op_size ) ( +rhs )->resize( op_size, false );
 						break;
@@ -489,7 +526,7 @@ namespace vtil::symbolic
 					case math::operator_id::equal:
 					case math::operator_id::not_equal:
 					{
-						bitcnt_t op_size = std::max( lhs->size(), rhs->size() );
+						bitcnt_t op_size = optimistic_size( lhs, rhs );
 						if ( lhs->size() != op_size ) ( +lhs )->resize( op_size, true );
 						if ( rhs->size() != op_size ) ( +rhs )->resize( op_size, true );
 						break;
@@ -500,7 +537,7 @@ namespace vtil::symbolic
 					case math::operator_id::uequal:
 					case math::operator_id::unot_equal:
 					{
-						bitcnt_t op_size = std::max( lhs->size(), rhs->size() );
+						bitcnt_t op_size = optimistic_size( lhs, rhs );
 						if ( lhs->size() != op_size ) ( +lhs )->resize( op_size, false );
 						if ( rhs->size() != op_size ) ( +rhs )->resize( op_size, false );
 						op = op == math::operator_id::uequal ? math::operator_id::equal

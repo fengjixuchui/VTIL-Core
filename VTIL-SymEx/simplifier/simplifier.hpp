@@ -44,12 +44,12 @@ namespace vtil::symbolic
 	// Attempts to simplify the expression given, returns whether the simplification
 	// succeeded or not.
 	//
-	bool simplify_expression( expression::reference& exp, bool pretty = false, int64_t max_depth = -1 );
+	bool simplify_expression( expression::reference& exp, bool pretty = false, int64_t max_depth = -1, bool unpack = true );
 
 	// Purges/references the current thread's simplifier cache.
 	//
-	void purge_simplifier_cache();
 	simplifier_cache_t& ref_simplifier_cache();
+	static void purge_simplifier_cache() { ref_simplifier_cache().clear(); }
 
 	// RAII hack to purge the cache once the we're out of scope.
 	//

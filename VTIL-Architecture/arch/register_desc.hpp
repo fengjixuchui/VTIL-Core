@@ -96,7 +96,7 @@ namespace vtil
 		// of the full 64-bit range as otherwise we'd have to reserve some magic numbers for flags and stack pointer. 
 		// Due to this reason, flags should also be compared when doing comparison.
 		//
-		size_t local_id;
+		uint64_t local_id;
 		
 		// Size of the register in bits.
 		//
@@ -116,7 +116,7 @@ namespace vtil
 
 		// Construct a fully formed register.
 		//
-		register_desc( uint32_t flags, size_t id, bitcnt_t bit_count, bitcnt_t bit_offset = 0 )
+		register_desc( uint32_t flags, uint64_t id, bitcnt_t bit_count, bitcnt_t bit_offset = 0 )
 			: flags( flags ), local_id( id ), bit_count( bit_count ), bit_offset( bit_offset ) 
 		{ 
 			fassert( is_valid() ); 
@@ -261,7 +261,7 @@ namespace vtil
 			//
 			if ( ( flags & register_physical ) )
 				#pragma warning(suppress: 4267)
-				return prefix + amd64::name( amd64::extend( local_id ) ) + suffix;
+				return prefix + amd64::name( amd64::extend( math::narrow_cast<uint8_t>( local_id ) ) ) + suffix;
 			else
 				return prefix + "vr" + std::to_string( local_id ) + suffix;
 		}

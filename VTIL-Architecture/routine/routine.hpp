@@ -44,6 +44,12 @@ namespace vtil
 	//
 	struct routine
 	{
+		// This structure cannot be copied without a call to ::clone().
+		//
+		routine() = default;
+		routine( const routine& ) = delete;
+		routine& operator=( const routine& ) = delete;
+
 		// Mutex guarding the whole structure, more information on thread-safety can be found at basic_block.hpp.
 		//
 		mutable critical_section mutex;
@@ -59,7 +65,7 @@ namespace vtil
 
 		// Last local identifier used for an internal register.
 		//
-		std::atomic<size_t> last_internal_id = { 0 };
+		std::atomic<uint64_t> last_internal_id = { 0 };
 
 		// Calling convention of the routine.
 		//
@@ -73,11 +79,13 @@ namespace vtil
 		//
 		std::map<vip_t, call_convention> spec_subroutine_conventions;
 
-		// This structure cannot be copied.
+		// Misc. stats.
 		//
-		routine() = default;
-		routine( const routine& ) = delete;
-		routine& operator=( const routine& ) = delete;
+		std::atomic<size_t> local_opt_count = { 0 };
+
+		// Multivariate runtime context.
+		//
+		mutable multivariate context = {};
 
 		// Helpers for the allocation of unique internal registers.
 		//
@@ -121,5 +129,9 @@ namespace vtil
 		// Routine structures free all basic blocks they own upon their destruction.
 		//
 		~routine();
+
+		// Clones the routine and it's every block.
+		//
+		routine* clone() const;
 	};
 };

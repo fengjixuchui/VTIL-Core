@@ -26,29 +26,37 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <vtil/symex>
 #include <vtil/arch>
+#include "../common/interface.hpp"
 
-namespace vtil::optimizer::aux
+namespace vtil::optimizer
 {
-	// Helper to check if the expression given is block-local.
+	// Removes every non-volatile instruction whose effects are
+	// ignored or overwritten.
 	//
-	bool is_local( const symbolic::expression& ex );
+	struct dead_code_elimination_pass : pass_interface<true>
+	{
+		cached_tracer ctrace;
+		std::set<basic_block*> visited;
 
-	// Helper to check if the current value stored in the variable is used by the routine.
-	//
-	bool is_used( const symbolic::variable& var, bool rec, tracer* tracer );
+		size_t pass( basic_block* blk, bool xblock = false ) override;
 
-	// Helper to check if the given symbolic variable's value is preserved upto [dst].
-	//
-	bool is_alive( const symbolic::variable& var, const il_const_iterator& dst, tracer* tracer );
-
-	// Revives the value of the given variable to be used by the point specified.
-	//
-	register_desc revive_register( const symbolic::variable& var, const il_iterator& it );
-
-	// Returns each possible branch destination of the given basic block in the format of:
-	// - [is_real, target] x N
-	//
-	std::vector<std::pair<bool, symbolic::expression>> discover_branches( const basic_block* blk, tracer* tracer, bool xblock );
-}
+		// Cross block logic should execute from the bottom.
+		//
+		size_t cpass( basic_block* blk )
+		{
+			if ( visited.contains( blk ) )
+				return 0;
+			visited.insert( blk );
+			size_t count = 0;
+			for ( basic_block* block : blk->next )
+				count += cpass( block );
+			count += pass( blk, true );
+			return count;
+		}
+		size_t xpass( routine* rtn ) override
+		{
+			return cpass( rtn->entry_point );
+		}
+	};
+};

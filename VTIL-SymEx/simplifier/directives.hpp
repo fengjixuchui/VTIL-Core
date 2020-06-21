@@ -81,6 +81,7 @@ namespace vtil::symbolic::directive
         { A+(-B),                                             A-B },
         { ~((~A)+B),                                          A-B },
         { ~(A-B),                                             (~A)+B },
+        { (~A+U),                                             (U-1)-A },
 
         // NEG conversion.
         //
@@ -100,30 +101,11 @@ namespace vtil::symbolic::directive
         { ~__uless(A,B),                                      __ugreat_eq(A,B) },
         { ~__uless_eq(A,B),                                   __ugreat(A,B) },
 
-        // Evaluate partial comparison.
-        //
-        { A>=B,                                               __iff(A==B, 1) },
-        { A>=B,                                               __iff(A!=B, A>B) },
-        { A<=B,                                               __iff(A==B, 1) },
-        { A<=B,                                               __iff(A!=B, A<B) },
-        { __ugreat_eq(A,B),                                   __iff(A==B, 1) },
-        { __ugreat_eq(A,B),                                   __iff(A!=B, __ugreat(A,B)) },
-        { __uless_eq(A,B),                                    __iff(A==B, 1) },
-        { __uless_eq(A,B),                                    __iff(A!=B, __uless(A,B)) },
-
-        // Evaluate based on equality.
-        //
-        { A>B,                                                __iff(A==B, 0) },
-        { A<B,                                                __iff(A==B, 0) },
-        { __ugreat(A,B),                                      __iff(A==B, 0) },
-        { __uless(A,B),                                       __iff(A==B, 0) },
-
         // NOT conversion.
         //
         { A^-1,                                               ~A },
-        { A==0,                                               __iff((__mask_knw1(A)|__mask_unk(A))==1u, ~__ucast(A,1)) },
-        { A!=1,                                               __iff((__mask_knw1(A)|__mask_unk(A))==1u, ~__ucast(A,1)) },
-        { -A,                                                 __iff((__mask_knw1(A)|__mask_unk(A))==1u, ~__ucast(A,1)) },
+        { A==0,                                               __iff(__bcnt(A)==1u, A^1) },
+        { A!=1,                                               __iff(__bcnt(A)==1u, A^1) },
 
         // XOR conversion.
         //
@@ -194,7 +176,8 @@ namespace vtil::symbolic::directive
 
         // Simplify manual sign extension.
         //
-        { __ucast(A, B)|(__ucast((0x1+~(A>>U)), B)<<C),       __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A)), __cast(A, B)) },
+        { __ucast(A, B)|(__ucast((0x1+~(A>>U)), B)<<C),       __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A)), __cast(A,B)) },
+        { __ucast(A, B)|((~(__ucast(A,B)>>U)+0x1)<<C),        __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A)), __cast(A,B)) },
     };
 
     // Describes the way operands of two operators join each other.
@@ -321,58 +304,11 @@ namespace vtil::symbolic::directive
         { ~__rotl(A,C),                                       __rotl(!~A,C) },
         { ~__rotr(A,C),                                       __rotr(!~A,C) },
 
-        // Comparison simplifiers: [TODO: Complete]
+
+        // Manually added comparison simplifiers:
         //
-        { (A+B)>C,                                            A>!(C-B) },
-        { (A-B)>C,                                            A>!(C+B) },
-        //{ __ugreat(A+B, C),                                  __uless(A,!(C-B)) },
-        //{ __ugreat(A-B, C),                                  __uless(A,!(C+B)) },
-        { (A+B)>=C,                                           A>=!(C-B) },
-        { (A-B)>=C,                                           A>=!(C+B) },
-        //{ __ugreat_eq(A+B, C),                               __uless_eq(A,!(C-B)) },
-        //{ __ugreat_eq(A-B, C),                               __uless_eq(A,!(C+B)) },
-        { (A+B)==C,                                           A==!(C-B) },
-        { (A-B)==C,                                           A==!(C+B) },
-        { (A+B)!=C,                                           A!=!(C-B) },
-        { (A-B)!=C,                                           A!=!(C+B) },
-        { (A+B)<=C,                                           A<=!(C-B) },
-        { (A-B)<=C,                                           A<=!(C+B) },
-        //{ __uless_eq(A+B, C),                                __ugreat_eq(A,!(C-B)) },
-        //{ __uless_eq(A-B, C),                                __ugreat_eq(A,!(C+B)) },
-        { (A+B)<C,                                            A<!(C-B) },
-        { (A-B)<C,                                            A<!(C+B) },
-        //{ __uless(A+B, C),                                   __ugreat(A,!(C-B)) },
-        //{ __uless(A-B, C),                                   __ugreat(A,!(C+B)) },
-
-        { A==B,                                               !(A-B)==0u },
-        { A==B,                                               !(A^B)==0u },
-        { A!=B,                                               !(A-B)!=0u },
-        { A!=B,                                               !(A^B)!=0u },
-
-        { (A^B)==C,                                           !(C^B)==A },
         { (A<<B)==C,                                          s((A<<B)>>B)==s(C>>B) },
         { (A>>B)==C,                                          s((A>>B)<<B)==s(C<<B) },
-            
-        { A>B,                                                !(~A)<s(~B) },
-        { A>=B,                                               !(~A)<=s(~B) },
-        { __ugreat(A,B),                                      __uless(!(~A),s(~B)) },
-        { __ugreat_eq(A,B),                                   __uless_eq(!(~A),s(~B)) },
-        { A==B,                                               !(~A)==s(~B) },
-        { A!=B,                                               !(~A)!=s(~B) },
-        { __uless_eq(A,B),                                    __ugreat_eq(!(~A),s(~B)) },
-        { __uless(A,B),                                       __ugreat(!(~A),s(~B)) },
-        { A<=B,                                               !(~A)>=s(~B) },
-        { A<B,                                                !(~A)>s(~B) },
-            
-        { A>B,                                                !(-A)<s(-B) },
-        { A>=B,                                               !(-A)<=s(-B) },
-        { A==B,                                               !(-A)==s(-B) },
-        { A!=B,                                               !(-A)!=s(-B) },
-        { A<=B,                                               !(-A)>=s(-B) },
-        { A<B,                                                !(-A)>s(-B) },
-
-
-
         { ((A<<B)|C)==0,                                      __iff(A==((A<<B)>>B), (A|C)==0u ) },
         { (A|B)==0,                                           s(A==0) & s(B==0) },
         { __ucast(A,B)==C,                                    __iff(__bcnt(A)<=__bcnt(C), __iff(C==__ucast(C,__bcnt(A)), A==s(__ucast(C,__bcnt(A))))) },
@@ -383,6 +319,7 @@ namespace vtil::symbolic::directive
     //
     static const std::pair<instance::reference, instance::reference> pack_descriptors[] =
     {
+        { __ucast(A>>B, 0x1),                                 __bt(A, B) },
         { (A>>B)&1,                                           __ucast(__bt(A,B),__bcnt(A)) },
         { (A&B)>>C,                                           __iff((B>>C)==1u, __ucast(__bt(A,C),__bcnt(A))) },
         { __if(A<=B,A)|__if(A>B,B),                           __min(A,B) },
@@ -403,7 +340,7 @@ namespace vtil::symbolic::directive
     //
     static const std::pair<instance::reference, instance::reference> unpack_descriptors[] =
     {
-        { __bt(A,B),                                          __ucast((A>>B)&1,1) },
+        { __bt(A,B),                                          __ucast((A&(1<<B))>>B,1) },
         { __min(A,B),                                         __if(A<=B,A)|__if(A>B,B) },
         { __max(A,B),                                         __if(A>=B,A)|__if(A<B,B) },
         { __umin(A,B),                                        __if(__uless_eq(A,B),A)|__if(__ugreat(A,B),B) },

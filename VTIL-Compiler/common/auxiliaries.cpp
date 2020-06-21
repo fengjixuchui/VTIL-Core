@@ -158,7 +158,7 @@ namespace vtil::optimizer::aux
 
 					// Skip if variable is not written to by this instruction.
 					//
-					auto details = pvar.written_by( it, tracer );
+					auto details = pvar.written_by( it, tracer, !is_restricted );
 					if ( !details ) return;
 
 					// If also read or if unknown access, skip.
@@ -181,7 +181,7 @@ namespace vtil::optimizer::aux
 
 					// Skip if variable is not read by this instruction.
 					//
-					auto details = pvar.read_by( it, tracer );
+					auto details = pvar.read_by( it, tracer, !is_restricted );
 					if ( !details ) return false;
 
 					// If unknown access, continue.
@@ -200,7 +200,7 @@ namespace vtil::optimizer::aux
 					{
 						// Use the symbolic variable API.
 						//
-						if ( auto details = pvar.accessed_by( it, tracer ) )
+						if ( auto details = pvar.accessed_by( it, tracer, !is_restricted ) )
 						{
 							// If unknown, assume used.
 							//
@@ -382,7 +382,7 @@ namespace vtil::optimizer::aux
 
 	// Helper to check if the given symbolic variable's value is preserved upto [dst].
 	//
-	bool is_alive( const symbolic::variable& var, const il_const_iterator& dst, tracer* tracer )
+	bool is_alive( const symbolic::variable& var, const il_const_iterator& dst, bool rec, tracer* tracer )
 	{
 		// If register:
 		//
@@ -442,7 +442,7 @@ namespace vtil::optimizer::aux
 				// := Project back to the iterator type.
 				.unproject()
 				// >> Skip until we find a write into the variable queried.
-				.where( [ & ] ( const il_const_iterator& i ) { return var.written_by( i, tracer ); } )
+				.where( [ & ] ( const il_const_iterator& i ) { return var.written_by( i, tracer, rec ); } )
 				// <= Return first match.
 				.first();
 
@@ -457,10 +457,6 @@ namespace vtil::optimizer::aux
 	register_desc revive_register( const symbolic::variable& var, const il_iterator& it )
 	{
 		fassert( var.is_register() );
-
-		// If cross block operation, lock routine mutex.
-		//
-		cnd_unique_lock _g{ it.container->owner->mutex, it.container != var.at.container };
 
 		// Drop const-qualifiers, this operation is not illegal since we're passed 
 		// non-constant iterator, meaning we have access to the routine itself.
@@ -487,24 +483,33 @@ namespace vtil::optimizer::aux
 	// Returns each possible branch destination of the given basic block in the format of:
 	// - [is_real, target] x N
 	//
-	std::vector<std::pair<bool, symbolic::expression>> discover_branches( const basic_block* blk, tracer* tracer, bool xblock )
+	branch_info analyze_branch( const basic_block* blk, tracer* tracer, bool xblock, bool pack )
 	{
 		// If block is not complete, return empty vector.
 		//
-		std::vector<std::pair<bool, symbolic::expression>> targets = {};
 		if ( !blk->is_complete() )
-			return targets;
+			return {};
+
+		// Declare tracer.
+		//
+		const auto trace = [ & ] ( symbolic::variable&& lookup )
+		{
+			auto exp = tracer->trace( std::move( lookup ) );
+			if ( xblock ) exp = tracer->rtrace_exp( std::move( exp ) );
+			if ( pack )   exp = symbolic::variable::pack_all( exp );
+			return exp;
+		};
 
 		// Declare operand->expression helper.
 		//
 		auto branch = std::prev( blk->end() );
-		auto discover = [ & ] ( const operand& op_dst, bool real )
+		auto discover = [ & ] ( const operand& op_dst, bool real, bool parse = true ) -> branch_info
 		{
 			// Determine the symbolic expression describing branch destination.
 			//
 			symbolic::expression destination = op_dst.is_immediate()
 				? symbolic::expression{ op_dst.imm().u64 }
-				: ( xblock ? tracer->rtrace_p( { branch, op_dst.reg() } ) : tracer->trace_p( { branch, op_dst.reg() } ) );
+				: trace( { branch, op_dst.reg() } );
 
 			// Remove any matches of REG_IMGBASE and pack.
 			//
@@ -518,32 +523,148 @@ namespace vtil::optimizer::aux
 				}
 			} ).simplify( true );
 
-			// Match classic Jcc:
+			// If parsing requested:
 			//
-			using namespace symbolic::directive;
-			std::vector<symbol_table_t> results;
-			if ( fast_match( &results, U + ( __if( A, C ) + __if( B, D ) ), destination ) )
+			if ( parse )
 			{
-				auto& sym = results.front();
-				if ( sym.translate( A )->equals( ~sym.translate( B ) ) )
+				// Match classic Jcc:
+				//
+				const auto extract_and_transform_cnd = [ & ] ( symbolic::expression& dst, symbolic::expression& cnd_out, bool state )
 				{
-					targets.emplace_back( real, sym.translate( U ) + sym.translate( C ) );
-					targets.emplace_back( real, sym.translate( U ) + sym.translate( D ) );
-					return;
-				}
-			}
+					bool confirmed = false;
 
-			// If not, push as is.
+					std::function<void( const symbolic::expression& )> explore_cc_space = [ & ] ( const symbolic::expression& exp )
+					{
+						if ( exp.op == math::operator_id::value_if )
+						{
+							if ( !cnd_out.is_valid() )
+								cnd_out = *exp.lhs;
+						}
+						else if ( ( exp.value.unknown_mask() | exp.value.known_one() ) == 1 )
+						{
+							if ( !cnd_out.is_valid() )
+								cnd_out = exp;
+						}
+						else if ( exp.is_variable() && exp.uid.get<symbolic::variable>().is_memory() )
+						{
+							exp.uid.get<symbolic::variable>().mem().decay().enumerate( explore_cc_space );
+						}
+					};
+
+					std::function<void( symbolic::expression& )> transform_cc = [ & ] ( symbolic::expression& exp )
+					{
+						if ( exp.op == math::operator_id::value_if )
+						{
+							if ( exp.lhs->equals( cnd_out ) )
+							{
+								exp = state ? *exp.rhs : 0;
+								confirmed = true;
+							}
+							else if ( exp.lhs->equals( ~cnd_out ) )
+							{
+								exp = state ? 0 : *exp.rhs;
+								confirmed = true;
+							}
+						}
+						else if ( ( exp.value.unknown_mask() | exp.value.known_one() ) == 1 )
+						{
+							if ( exp.equals( cnd_out ) )
+							{
+								exp = { state, exp.size() };
+								confirmed = true;
+							}
+							else if ( exp.equals( ~cnd_out ) )
+							{
+								exp = { state ^ 1, exp.size() };
+								confirmed = true;
+							}
+						}
+						else if ( exp.is_variable() && exp.uid.get<symbolic::variable>().is_memory() )
+						{
+							auto& var = exp.uid.get<symbolic::variable>();
+						
+							bool xblock_org = xblock;
+							xblock = false;
+							symbolic::pointer exp_ptr = var.mem().decay().clone().transform( transform_cc );
+							xblock = xblock_org;
+
+							if ( exp_ptr != var.mem().base )
+								exp = trace( symbolic::variable{ std::next( var.at ), { exp_ptr, var.mem().bit_count } } );
+						}
+					};
+
+					dst.enumerate( explore_cc_space );
+					dst.transform( transform_cc );
+					if ( !confirmed ) cnd_out = {};
+				};
+
+				symbolic::expression cc = {};
+				symbolic::expression dst1 = destination;
+				symbolic::expression dst2 = destination;
+				extract_and_transform_cnd( dst1, cc, true );
+				extract_and_transform_cnd( dst2, cc, false );
+
+				if ( cc )
+				{
+					// Make sure first condition is the simplest.
+					//
+					if ( cc.complexity > (~cc).complexity )
+					{
+						cc = ~cc;
+						std::swap( dst1, dst2 );
+					}
+
+					return {
+						.is_vm_exit = real,
+						.is_jcc = true,
+						.cc = cc.resize( 1 ),
+						.destinations = { dst1, dst2 }
+					};
+				}
+
+				// -- TODO: Handle jump tables.
+				//
+			}
+			
+			// Otherwise assume direct jump.
 			//
-			targets.emplace_back( real, destination );
+			return {
+				.is_vm_exit = real,
+				.destinations = { destination }
+			};
 		};
 
 		// Discover all targets and return.
 		//
-		for ( int idx : branch->base->branch_operands_vip )
-			discover( branch->operands[ idx ], false );
-		for ( int idx : branch->base->branch_operands_rip )
-			discover( branch->operands[ idx ], true );
-		return targets;
+		if ( *branch->base == ins::jmp )
+			return discover( branch->operands[ 0 ], false );
+		if ( *branch->base == ins::vexit )
+			return discover( branch->operands[ 0 ], true );
+		if ( *branch->base == ins::vxcall )
+			return discover( branch->operands[ 0 ], true );
+		if ( *branch->base == ins::js )
+		{
+			// If condition can be resolved in compile time:
+			//
+			symbolic::expression cc = trace( { branch, branch->operands[ 0 ].reg() } );
+			if ( cc.is_constant() )
+			{
+				// Redirect to jmp resolver.
+				//
+				return discover( branch->operands[ *cc.get<bool>() ? 1 : 2 ], false, false );
+			}
+
+			// Resolve each individually and form jcc.
+			//
+			branch_info b1 = discover( branch->operands[ 1 ], false, false );
+			branch_info b2 = discover( branch->operands[ 2 ], false, false );
+			return {
+				.is_vm_exit = false,
+				.is_jcc = true,
+				.cc = cc,
+				.destinations = { b1.destinations[ 0 ], b2.destinations[ 0 ] }
+			};
+		}
+		unreachable();
 	}
 };
