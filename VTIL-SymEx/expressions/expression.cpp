@@ -490,7 +490,6 @@ namespace vtil::symbolic
 					case math::operator_id::bitwise_or:
 					case math::operator_id::bitwise_xor:
 					case math::operator_id::umultiply_high:
-					case math::operator_id::umultiply:
 					case math::operator_id::udivide:
 					case math::operator_id::uremainder:
 					case math::operator_id::umax_value:
@@ -532,6 +531,16 @@ namespace vtil::symbolic
 						break;
 					}
 
+					// Convert unsigned multiply to signed multiply.
+					//
+					case math::operator_id::umultiply:
+					{
+						if ( lhs->size() != value.size() ) ( +lhs )->resize( value.size(), true );
+						if ( rhs->size() != value.size() ) ( +rhs )->resize( value.size(), true );
+						op = math::operator_id::multiply;
+						break;
+					}
+
 					// Convert unsigned compare to signed compare.
 					//
 					case math::operator_id::uequal:
@@ -554,11 +563,9 @@ namespace vtil::symbolic
 				complexity = ( lhs->complexity + rhs->complexity ) * 2;
 				fassert( complexity != 0 );
 
-				// If bitshift / rotation, punish additionally.
+				// Multiply with operator complexity coefficient.
 				//
-				if ( op == math::operator_id::shift_left || op == math::operator_id::shift_right ||
-					 op == math::operator_id::rotate_left || op == math::operator_id::rotate_right )
-					complexity *= 2;
+				complexity *= desc->complexity_coeff;
 
 				hash_t operand_hashes[] = { lhs->hash(), rhs->hash() };
 				// If operator is commutative, sort the array so that the

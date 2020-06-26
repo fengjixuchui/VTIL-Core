@@ -55,6 +55,14 @@ namespace vtil::symbolic::directive
         { A&A,                                                A },
         { A^0,                                                A },
         { A&-1,                                               A },
+        { A*1,                                                A },
+        { A*1u,                                               A },
+        { A/1,                                                A },
+        { A/1u,                                               A },
+        { __rotl(A,0),                                        A },
+        { __rotr(A,0),                                        A },
+        { A>>0,                                               A },
+        { A<<0,                                               A },
         { A==1,                                               __iff(__bcnt(A)==1u, A) },
         { A!=0,                                               __iff(__bcnt(A)==1u, A) },
 
@@ -69,10 +77,12 @@ namespace vtil::symbolic::directive
         { A+(~A),                                            -1 },
         { A^(~A),                                            -1 },
         { A|(~A),                                            -1 },
-        { __rotl(A,0),                                        A },
-        { __rotr(A,0),                                        A },
-        { A>>0,                                               A },
-        { A<<0,                                               A },
+        { A/A,                                                1 },
+        { udiv(A,A),                                          1 },
+        { A%A,                                                0 },
+        { urem(A,A),                                          0 },
+        { A*0,                                                0 },
+        { A*0u,                                               0 },
         //{ A>>B,                                             __iff(B>=__bcnt(A), 0) },     [Removed as partial evaluator will take care of this]
         //{ A<<B,                                             __iff(B>=__bcnt(A), 0) },     [Removed as partial evaluator will take care of this]
 
@@ -87,6 +97,12 @@ namespace vtil::symbolic::directive
         //
         { ~(A-1),                                             -A },
         { 0-A,                                                -A },
+
+        // MUL conversion.
+        //
+        { A+A,                                                A*2 },
+        { A*U-A,                                              A*(U-1) },
+        { A*U+A,                                              A*(U+1) },
 
         // Invert comparison.
         //
@@ -176,8 +192,9 @@ namespace vtil::symbolic::directive
 
         // Simplify manual sign extension.
         //
-        { __ucast(A, B)|(__ucast((0x1+~(A>>U)), B)<<C),       __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A)), __cast(A,B)) },
-        { __ucast(A, B)|((~(__ucast(A,B)>>U)+0x1)<<C),        __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A)), __cast(A,B)) },
+        { __ucast(A,B)|(__ucast((0x1+~(A>>U)), B)<<C),       __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
+        { __ucast(A,B)|((~(__ucast(A,B)>>U)+0x1)<<C),        __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
+        { (((((~(A>>B))|-0x2)+0x1)<<U)|A),                   __iff((U==(B+1))&(__bcnt(A)!=1), __cast(__ucast(A,U),__bcnt(A))) },
     };
 
     // Describes the way operands of two operators join each other.
@@ -210,7 +227,7 @@ namespace vtil::symbolic::directive
         { A-(B-C),                                            !(A+C)-B },
         { A-(B-C),                                            !(A-B)+C },
         { (B+C)-A,                                            !(B-A)+C },
-        { (B-C)-A,                                            !B-(A+C) },
+        { (B-C)-A,                                            B-!(A+C) },
         { (B-C)-A,                                            !(B-A)-C },
 
         // OR:
@@ -304,6 +321,12 @@ namespace vtil::symbolic::directive
         { ~__rotl(A,C),                                       __rotl(!~A,C) },
         { ~__rotr(A,C),                                       __rotr(!~A,C) },
 
+        // Lower immediate urem/udiv/mul into and/shr/shl where possible.
+        //
+        { A*U,                                                __iff(__popcnt(U)==1, A<<!(__bsf(U)-1)) },
+        { A+(A<<U),                                           A*!(1 + (1<<U)) },
+        { urem(A,U),                                          __iff(__popcnt(U)==1, A&!(U-1)) },
+        { udiv(A,U),                                          __iff(__popcnt(U)==1, A>>!(__bsf(U)-1)) },
 
         // Manually added comparison simplifiers:
         //

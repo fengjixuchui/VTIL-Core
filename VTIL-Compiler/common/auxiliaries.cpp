@@ -152,7 +152,7 @@ namespace vtil::optimizer::aux
 
 						// If displacement is an immediate value and is below 0, declare discarded.
 						//
-						if ( disp && *disp < 0 )
+						if ( disp && *disp <= 0 )
 							query::rlocal( variable_mask ) = 0;
 					}
 
@@ -368,7 +368,7 @@ namespace vtil::optimizer::aux
 				{
 					// If block is complete and is exiting vm, report not used.
 					//
-					if ( var.at.container->is_complete() && *var.at.container->stream.back().base == ins::vexit )
+					if ( var.at.container->is_complete() && var.at.container->stream.back().base == &ins::vexit )
 						return false;
 					return !var.is_register() || !var.reg().is_local();
 				}
@@ -494,8 +494,9 @@ namespace vtil::optimizer::aux
 		//
 		const auto trace = [ & ] ( symbolic::variable&& lookup )
 		{
-			auto exp = tracer->trace( std::move( lookup ) );
-			if ( xblock ) exp = tracer->rtrace_exp( std::move( exp ) );
+			auto exp = xblock
+				? tracer->rtrace( std::move( lookup ) )
+				: tracer->trace( std::move( lookup ) );
 			if ( pack )   exp = symbolic::variable::pack_all( exp );
 			return exp;
 		};
@@ -606,18 +607,10 @@ namespace vtil::optimizer::aux
 
 				if ( cc )
 				{
-					// Make sure first condition is the simplest.
-					//
-					if ( cc.complexity > (~cc).complexity )
-					{
-						cc = ~cc;
-						std::swap( dst1, dst2 );
-					}
-
 					return {
 						.is_vm_exit = real,
 						.is_jcc = true,
-						.cc = cc.resize( 1 ),
+						.cc = cc,
 						.destinations = { dst1, dst2 }
 					};
 				}
@@ -636,13 +629,13 @@ namespace vtil::optimizer::aux
 
 		// Discover all targets and return.
 		//
-		if ( *branch->base == ins::jmp )
+		if ( branch->base == &ins::jmp )
 			return discover( branch->operands[ 0 ], false );
-		if ( *branch->base == ins::vexit )
+		if ( branch->base == &ins::vexit )
 			return discover( branch->operands[ 0 ], true );
-		if ( *branch->base == ins::vxcall )
+		if ( branch->base == &ins::vxcall )
 			return discover( branch->operands[ 0 ], true );
-		if ( *branch->base == ins::js )
+		if ( branch->base == &ins::js )
 		{
 			// If condition can be resolved in compile time:
 			//

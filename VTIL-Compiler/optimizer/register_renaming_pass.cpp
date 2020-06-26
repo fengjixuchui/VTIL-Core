@@ -156,6 +156,7 @@ namespace vtil::optimizer
 				{
 					// Restrict iterator paths.
 					//
+					it_begin.clear_restrictions();
 					it_begin.restrict_path( it.container, true );
 
 					// => Begin forwards recursive query:
@@ -178,11 +179,11 @@ namespace vtil::optimizer
 
 								// Swap with destination register.
 								//
-								reg.local_id = dst.reg().local_id;
+								reg.combined_id = dst.reg().combined_id;
 								reg.flags = dst.reg().flags;
 								reg.bit_offset += dst.reg().bit_offset - src.reg().bit_offset;
 							}
-							fassert( ins.is_valid() );
+							ins.is_valid( true );
 						} );
 
 					// Nop the origin instruction.

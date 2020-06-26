@@ -45,6 +45,7 @@ namespace vtil::optimizer
 		size_t counter = 0;
 		while ( blk->next.size() == 1 &&
 				blk->next[ 0 ]->prev.size() == 1 &&
+				blk->next[ 0 ] != blk &&
 				blk->stream.back().base->is_branching_virt() )
 		{
 			// Pop the branching instruction.
@@ -88,10 +89,6 @@ namespace vtil::optimizer
 				blk->stream.push_back( std::move( ins ) );
 			}
 
-			// Acquire the routine lock.
-			//
-			std::lock_guard _g( blk->owner->mutex );
-
 			// Merge block states.
 			//
 			if ( blk_next->sp_index == 0 )
@@ -108,6 +105,55 @@ namespace vtil::optimizer
 				for ( basic_block*& src : dst->prev )
 					if ( src == blk_next )
 						src = blk;
+
+			// Acquire the routine lock.
+			//
+			std::lock_guard _g( blk->owner->mutex );
+
+			// Enumerate both forwards and backwards caches.
+			//
+			for ( auto& cache : blk->owner->path_cache )
+			{
+				// Enumerate:
+				// std::map<const basic_block*, std::map<const basic_block*, std::set<const basic_block*>>>
+				//
+				for ( auto it = cache.begin(); it != cache.end(); )
+				{
+					// If entry key references deleted block, erase it and continue.
+					//
+					if ( it->first == blk_next )
+					{
+						it = cache.erase( it );
+						continue;
+					}
+
+					// Enumerate:
+					// std::map<const basic_block*, std::set<const basic_block*>
+					//
+					for ( auto it2 = it->second.begin(); it2 != it->second.end(); )
+					{
+						// If entry key references deleted block, erase it and continue.
+						//
+						if ( it2->first == blk_next )
+						{
+							it2 = it->second.erase( it2 );
+							continue;
+						}
+
+						// Remove any references from set.
+						//
+						it2->second.erase( blk_next );
+						
+						// Continue iteration.
+						//
+						it2++;
+					}
+
+					// Continue iteration.
+					//
+					it++;
+				}
+			}
 
 			// Delete the target block and increment counter.
 			//

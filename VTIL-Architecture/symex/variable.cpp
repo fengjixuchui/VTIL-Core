@@ -108,8 +108,8 @@ namespace vtil::symbolic
 
 						// Determine all paths and path restrict the iterator.
 						//
-						auto pathset_1 = il_const_iterator::path_to( var.at.container, o1, false );
-						auto pathset_2 = il_const_iterator::path_to( var.at.container, o2, false );
+						auto& pathset_1 = o1->owner->path_cache[ 1 ][ o1 ][ var.at.container ];
+						auto& pathset_2 = o2->owner->path_cache[ 1 ][ o2 ][ var.at.container ];
 						var.at.is_path_restricted = true;
 
 						// If only one of the paths are valid for backwards iteration:
@@ -118,8 +118,7 @@ namespace vtil::symbolic
 						{
 							// Set the restriction.
 							//
-							var.at.is_path_restricted = true;
-							var.at.paths_allowed = pathset_1.empty() ? pathset_2 : pathset_1;
+							var.at.paths_allowed = pathset_1.empty() ? &pathset_2 : &pathset_1;
 							exp = tracer->rtrace( std::move( var ) );
 						}
 						// If both paths are valid for backwards iteration:
@@ -128,9 +127,9 @@ namespace vtil::symbolic
 						{
 							// Calculate for both and set if equivalent.
 							//
-							var.at.paths_allowed = pathset_1;
+							var.at.paths_allowed = &pathset_1;
 							auto exp1 = tracer->rtrace( var );
-							var.at.paths_allowed = pathset_2;
+							var.at.paths_allowed = &pathset_2;
 							auto exp2 = tracer->rtrace( var );
 							if ( exp1.equals( exp2 ) )
 								exp = exp1;
@@ -291,7 +290,7 @@ namespace vtil::symbolic
 
 				// If exiting the virtual machine:
 				//
-				if ( *it->base == ins::vexit )
+				if ( it->base == &ins::vexit )
 				{
 					// If retval register, indicate read from:
 					//
@@ -404,7 +403,7 @@ namespace vtil::symbolic
 
 				// If vmexit, declared trashed if below or at the shadow space:
 				//
-				if ( *it->base == ins::vexit ? it.container->owner->routine_convention.purge_stack : cc.purge_stack )
+				if ( it->base == &ins::vexit ? it.container->owner->routine_convention.purge_stack : cc.purge_stack )
 				{
 					// Determine the limit of the stack memory owned by this routine.
 					//
@@ -450,7 +449,7 @@ namespace vtil::symbolic
 
 		// Validate the variable.
 		//
-		fassert( is_valid() );
+		is_valid( true );
 	}
 	
 	// Construct free-form with only the descriptor itself.
@@ -460,20 +459,20 @@ namespace vtil::symbolic
 
 	// Returns whether the variable is valid or not.
 	//
-	bool variable::is_valid() const
+	bool variable::is_valid( bool force ) const
 	{
+#define validate(...) { if( force ) fassert(__VA_ARGS__); else if( !(__VA_ARGS__) ) return false; }
 		// If register:
 		//
 		if ( auto* reg = std::get_if<register_t>( &descriptor ) )
 		{
 			// Iterator must be valid if not read-only.
 			//
-			if ( !at.is_valid() && !reg->is_read_only() )
-				return false;
+			validate( at.is_valid() || reg->is_read_only() );
 
 			// Redirect to register descriptor validation.
 			//
-			return reg->is_valid();
+			return reg->is_valid( force );
 		}
 		// If memory:
 		//
@@ -483,20 +482,19 @@ namespace vtil::symbolic
 
 			// Iterator must be valid.
 			//
-			if ( !at.is_valid() )
-				return false;
+			validate( at.is_valid() );
 
 			// Must have a valid pointer of 64 bits.
 			//
-			if ( !mem.base.base || mem.base.base.size() != 64 )
-				return false;
+			validate( mem.base.base && mem.base.base.size() == 64 );
 
 			// Bit count should be within (0, 64] and byte-addressable.
 			//
-			return 0 < mem.bit_count && 
-				   mem.bit_count <= 64 && 
-				   ( mem.bit_count & 7 ) == 0;
+			validate( 0 < mem.bit_count && mem.bit_count <= 64 && ( mem.bit_count & 7 ) == 0 );
+
+			return true;
 		}
+#undef validate
 	}
 
 	// Returns whether it is bound to a free-form iterator or not.
@@ -529,7 +527,7 @@ namespace vtil::symbolic
 		// Extend to 64-bits with offset set at 0, shift it and
 		// mask it to experss the value of original register.
 		//
-		expression&& tmp = variable{ at, register_desc{ src.flags, src.local_id, 64 } }.to_expression( false );
+		expression&& tmp = variable{ at, register_desc{ src.flags, src.local_id, 64, 0, src.architecture } }.to_expression( false );
 		return ( src.bit_offset ? tmp >> src.bit_offset : tmp ).resize( src.bit_count );
 	}
 

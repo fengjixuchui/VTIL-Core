@@ -32,7 +32,7 @@ namespace vtil
 {
 	// Hooks default tracer and does a cache lookup before invokation.
 	//
-	symbolic::expression cached_tracer::trace( symbolic::variable lookup )
+	symbolic::expression cached_tracer::trace( const symbolic::variable& lookup )
 	{
 		using namespace logger;
 
@@ -95,7 +95,7 @@ namespace vtil
 				auto& self = lookup.reg();
 				auto& other = pair.first.reg();
 				return self.flags == other.flags &&
-					self.local_id == other.local_id &&
+					self.combined_id == other.combined_id &&
 					self.bit_offset == other.bit_offset &&
 					self.bit_count >= other.bit_count;
 			};
@@ -107,6 +107,26 @@ namespace vtil
 		auto it = cache.find( lookup );
 		if ( it != cache.end() )
 		{
+			// If recursive flag is set, fix the expression:
+			//
+			if ( recursive_flag )
+			{
+				symbolic::expression result = *it->second;
+				lock = {};
+
+				result.transform( [ & ] ( symbolic::expression& exp )
+				{
+					if ( exp.is_variable() )
+					{
+						auto& var = exp.uid.get<symbolic::variable>();
+						if ( !var.at.is_begin() )
+							exp = tracer::trace( var );
+					}
+				} );
+
+				return result;
+			}
+
 			const symbolic::expression& result = *it->second;
 #if VTIL_OPT_TRACE_VERBOSE
 			// Log result.

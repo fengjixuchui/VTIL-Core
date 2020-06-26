@@ -38,7 +38,7 @@ namespace vtil::debug
 {
 	static void dump( const instruction& ins, const instruction* prev = nullptr )
 	{
-		using namespace vtil::logger;
+		using namespace logger;
 		
 		// Print stack pointer offset
 		//
@@ -81,7 +81,7 @@ namespace vtil::debug
 				fassert( op.is_immediate() );
 
 				if ( ins.base->memory_operand_index  != -1 &&
-					 &ins.operands[ ins.base->memory_operand_index + 1 ] == &op &&
+					 &ins.operands[ size_t( ins.base->memory_operand_index ) + 1 ] == &op &&
 					 ins.operands[ ins.base->memory_operand_index ].reg().is_stack_pointer() )
 				{
 					if ( op.imm().i64 >= 0 )
@@ -143,22 +143,45 @@ namespace vtil::debug
 					std::vector<uint8_t> bytes;
 					for ( auto it2 = it; it2 != blk->end(); it2++ )
 					{
-						if ( it2->base->name == "vemit" )
-						{
-							uint8_t* bs = ( uint8_t* ) &it2->operands[ 0 ].imm().u64;
-							bytes.insert( bytes.end(), bs, bs + it2->operands[ 0 ].size() );
-						}
+						if ( it2->base->name != "vemit" )
+							break;
+						uint8_t* bs = ( uint8_t* ) &it2->operands[ 0 ].imm().u64;
+						bytes.insert( bytes.end(), bs, bs + it2->operands[ 0 ].size() );
 					}
 
-					auto dasm = capstone::disasm( bytes.data(), it->vip == invalid_vip ? 0 : it->vip, bytes.size() );
-					for ( auto& ins : dasm )
-						log<CON_YLW>( "; %s\n", ins );
+					if ( bytes.size() )
+					{
+						if ( it.container->owner->arch_id == architecture_amd64 )
+						{
+							auto dasm = amd64::disasm( bytes.data(), it->vip == invalid_vip ? 0 : it->vip, bytes.size() );
+							for ( auto& ins : dasm )
+								log<CON_YLW>( "; %s\n", ins );
+						}
+						else
+						{
+							auto dasm = arm64::disasm( bytes.data(), it->vip == invalid_vip ? 0 : it->vip, bytes.size() );
+							for ( auto& ins : dasm )
+								log<CON_YLW>( "; %s\n", ins );
+						}
+					}
 					no_disasm = true;
 				}
 			}
 			else
 			{
 				no_disasm = false;
+			}
+
+			// Print string context if any.
+			//
+			if ( it->context.has<std::string>() )
+			{
+				const std::string& cmt = it->context;
+				log<CON_GRN>( "// %s\n", cmt );
+
+				// Skip if nop.
+				//
+				if ( it->base == &ins::nop ) continue;
 			}
 
 			log<CON_BLU>( "%04d: ", ins_idx );

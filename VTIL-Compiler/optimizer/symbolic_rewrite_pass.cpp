@@ -36,19 +36,18 @@ namespace vtil::optimizer
 	{
 		// Acquire shared mutex and create cached tracer.
 		//
-		std::shared_lock lock{ mtx };
 		cached_tracer ctracer = {};
 
 		// Determine the temporary sizes in the block.
 		//
-		std::map<std::pair<uint64_t, size_t>, bitcnt_t> temp_sizes;
+		std::map<std::pair<uint64_t, uint64_t>, bitcnt_t> temp_sizes;
 		for ( auto& ins : blk->stream )
 		{
 			for ( auto& op : ins.operands )
 			{
 				if ( op.is_register() && op.reg().is_local() )
 				{
-					bitcnt_t& sz = temp_sizes[ { op.reg().flags, op.reg().local_id } ];
+					bitcnt_t& sz = temp_sizes[ { op.reg().flags, op.reg().combined_id } ];
 					sz = std::max( sz, op.reg().bit_count + op.reg().bit_offset );
 				}
 			}
@@ -60,7 +59,7 @@ namespace vtil::optimizer
 		lambda_vm<symbolic_vm> vm;
 		vm.hooks.size_register = [ & ] ( const register_desc& reg )
 		{
-			if ( auto it = temp_sizes.find( { reg.flags, reg.local_id } );
+			if ( auto it = temp_sizes.find( { reg.flags, reg.combined_id } );
 				      it != temp_sizes.end() )
 			{
 				// Pick the minimum size from preferred sizes.
@@ -141,12 +140,12 @@ namespace vtil::optimizer
 
 				// If register value is not used after this instruction, skip from emitted state.
 				//
-				if ( !aux::is_used( { std::prev( limit ), k }, xblock, &ctracer ) )
+				if ( !aux::is_used( { std::prev( limit ), k }, false, &ctracer ) )
 					continue;
 				
 				// Try minimizing expression size.
 				//
-				for ( bitcnt_t size : prefered_exp_sizes )
+				for ( bitcnt_t size : preferred_exp_sizes )
 				{
 					// Skip if above or equal.
 					//
@@ -164,7 +163,7 @@ namespace vtil::optimizer
 
 				// If partially inherited flags register:
 				//
-				if ( k.is_flags() && k.bit_count != 64 && prefered_exp_sizes.contains( 1 ) )
+				if ( k.is_flags() && k.bit_count != 64 && preferred_exp_sizes.contains( 1 ) )
 				{
 					// For each bit:
 					//
@@ -206,8 +205,9 @@ namespace vtil::optimizer
 			// For each memory state:
 			// -- TODO: Simplify memory state, merge if simplifies, discard if left as is.
 			//
-			for ( auto [k, v] : vm.memory_state )
+			for ( const auto& [k, _v] : vm.memory_state )
 			{
+				auto v = _v;
 				symbolic::expression v0 = symbolic::make_memory_ex( k, v.size() );
 
 				// If value is unchanged, skip.
@@ -217,8 +217,12 @@ namespace vtil::optimizer
 
 				// Try minimizing expression size.
 				//
-				for ( bitcnt_t size : prefered_exp_sizes )
+				for ( bitcnt_t size : preferred_exp_sizes )
 				{
+					// Skip if not byte-aligned.
+					//
+					if ( size & 7 ) continue;
+
 					// If all bits above [size] are matching with original value, resize.
 					//
 					if ( ( v >> size ).equals( v0 >> size ) )
@@ -320,8 +324,6 @@ namespace vtil::optimizer
 		// Acquire a unique lock and rewrite the stream. Purge simplifier cache since block 
 		// iterators are now invalidated making the cache also invalid.
 		//
-		lock.unlock();
-		std::unique_lock _g{ mtx };
 		blk->stream = temporary_block.stream;
 		blk->last_temporary_index = temporary_block.last_temporary_index;
 		symbolic::purge_simplifier_cache();

@@ -39,15 +39,6 @@
 #include "concept.hpp"
 #include "../io/asserts.hpp"
 
-// [Configuration]
-// Determine stack buffer clamping range.
-//
-#ifndef VTIL_STACK_BUFFER_SIZE_RANGE
-	#define VTIL_STACK_BUFFER_SIZE_RANGE	0x100, 0x1000
-#else
-	static_assert( std::initializer_list{ VTIL_STACK_BUFFER_SIZE_RANGE }.size() == 2, "Invalid buffer range specification." );
-#endif
-
 namespace vtil
 {
 	namespace impl
@@ -135,6 +126,10 @@ namespace vtil
 		template <typename T2>
 		stack_buffered_allocator( const stack_buffered_allocator<T2, real_type>& o ) 
 			: state( ( stack_buffer_state<T, real_type>* ) o.state ) {}
+		//
+		template <typename T2>
+		stack_buffered_allocator( stack_buffered_allocator<T2, real_type>&& o ) 
+			: state( ( stack_buffer_state<T, real_type>* ) o.state ) {}
 
 		// Allocators are only equivalent if the internal state references
 		// the same stack buffer.
@@ -198,16 +193,13 @@ namespace vtil
 		typename container_t = impl::swap_allocator_t<T, allocator_t>>
 	struct stack_buffered_container : public container_t
 	{
-		static constexpr size_t _size_range[] = { VTIL_STACK_BUFFER_SIZE_RANGE };
-
-		// Clamp the number of bytes in the buffer to [0x100, 0x1000].
-		// - Append 0x20 bytes for _DEBUG binaries to compensate for std::_Container_proxy;
+		// Append 0x20 bytes for _DEBUG binaries to compensate for std::_Container_proxy;
 		//
 		static constexpr size_t align_mask = alignof( T ) - 1;
 #ifdef _DEBUG
-		static constexpr size_t buffer_size = std::clamp<size_t>( N * sizeof( typename T::value_type ), _size_range[ 0 ], _size_range[ 1 ] ) + ( 0x20 + sizeof( T ) + align_mask ) * 2;
+		static constexpr size_t buffer_size = N * sizeof( typename T::value_type ) + ( 0x20 + sizeof( T ) + align_mask ) * 2;
 #else
-		static constexpr size_t buffer_size = std::clamp<size_t>( N * sizeof( typename T::value_type ), _size_range[ 0 ], _size_range[ 1 ] );
+		static constexpr size_t buffer_size = N * sizeof( typename T::value_type );
 #endif
 
 		// Buffer aligned to match the alignment of T. 

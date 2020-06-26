@@ -101,7 +101,7 @@ namespace vtil::symbolic
 	{
 		// Determine pointer strength and the flags.
 		//
-		strenght = +1;
+		strength = +1;
 		base.evaluate( [ & ] ( const unique_identifier& uid )
 		{
 			// If variable is a register that is a restricted base pointer:
@@ -116,7 +116,7 @@ namespace vtil::symbolic
 			//
 			else
 			{
-				strenght = -1;
+				strength = -1;
 			}
 
 			// Return dummy result.
@@ -136,7 +136,7 @@ namespace vtil::symbolic
 				if ( var.is_register() )
 				{
 					const variable::register_t& reg = var.reg();
-					uint64_t pseudo_pointer = make_hash( reg.flags, reg.bit_offset, reg.local_id, k ).as64();
+					uint64_t pseudo_pointer = make_hash( reg.flags, reg.bit_offset, reg.combined_id, k ).as64();
 					return pseudo_pointer & math::fill( reg.bit_count );
 				}
 				else
@@ -171,12 +171,7 @@ namespace vtil::symbolic
 		for ( size_t n = 1; n < xpointer.size(); n++ )
 			if ( ( xpointer[ n ] - o.xpointer[ n ] ) != delta )
 				return std::nullopt;
-
-#if VTIL_SYM_PTR_SAFE_DISP
-		return ( pointer.decay() - o.pointer.decay() ).get<true>();
-#else
-		return delta;
-#endif
+		return ( base.decay() - o.base.decay() ).get<true>();
 	}
 
 	// Checks whether the two pointers can overlap in terms of real destination, 

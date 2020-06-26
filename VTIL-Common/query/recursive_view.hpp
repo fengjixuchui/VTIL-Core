@@ -164,7 +164,7 @@ namespace vtil::query
 		using fn_container_filter = std::function<bool( const container_type* src, const container_type * dst, bool first_time )>;
 		fn_container_filter filter = {};
 
-		// Special iterator saved by the root to mark the 
+		// Special iterator saved by the root to mark the
 		// beginning of it's iteration so loops can properly
 		// lead to it.
 		//
@@ -311,22 +311,20 @@ namespace vtil::query
 					std::vector desc_list = view.query.recurse();
 					for ( auto& desc : desc_list )
 					{
-						auto visited_copy = visited;
-
 						// If we did not already visit it:
 						//
-						bool first_visit = visited_copy.find( desc.iterator.container ) == visited_copy.end();
+						bool first_visit = visited.find( desc.iterator.container ) == visited.end();
 						if ( filter( view.query.iterator.container, desc.iterator.container, first_visit ) )
 						{
-							// Mark the container visited.
-							//
-							visited_copy.insert( desc.iterator.container );
 
 							// Create another recursive view with the new query.
 							//
 							recursive_view view_new = clone();
 							view_new.view.query = desc;
-							view_new.visited = visited_copy;
+
+							// Mark the container visited.
+							//
+							if ( first_visit ) view_new.visited.insert( desc.iterator.container );
 
 							// If iterator belongs to the same container as the root:
 							//
@@ -371,8 +369,8 @@ namespace vtil::query
 		}
 
 		// [Collection method]
-		// Collects each entry in std::vector<> and saves that in the 
-		// recursive_result structure. Continues appending paths and 
+		// Collects each entry in std::vector<> and saves that in the
+		// recursive_result structure. Continues appending paths and
 		// results in that structure until stream is finished.
 		//
 		auto collect()
@@ -390,9 +388,9 @@ namespace vtil::query
 		}
 
 		// [Collection method]
-		// Collects first entry in std::vector<>, saves that in the 
-		// recursive_result structure and stops if applicable. 
-		// Otherwise continues appending paths in that structure 
+		// Collects first entry in std::vector<>, saves that in the
+		// recursive_result structure and stops if applicable.
+		// Otherwise continues appending paths in that structure
 		// until a valid entry is hit.
 		//
 		auto first()

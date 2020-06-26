@@ -38,8 +38,7 @@
 // Determine whether we should use the simplification of (A-B) as the delta 
 // or the value estimated by the xpointers, and the number of xpointers we use.
 //
-#ifndef VTIL_SYM_PTR_SAFE_DISP
-	#define VTIL_SYM_PTR_SAFE_DISP 0
+#ifndef VTIL_SYM_PTR_XPTR_KEYS
 	#define VTIL_SYM_PTR_XPTR_KEYS 8
 #endif
 
@@ -58,7 +57,7 @@ namespace vtil::symbolic
 		//
 		struct make_weak
 		{
-			pointer operator()( pointer p ) { return ( p.strenght = INT32_MIN, p ); }
+			pointer operator()( pointer p ) { return ( p.strength = INT32_MIN, p ); }
 		};
 
 		// The symbolic expression that will represent the virtual address 
@@ -72,7 +71,7 @@ namespace vtil::symbolic
 		
 		// Strength of the pointer. -1 when it has unknowns, +1 on fully known value.
 		//
-		int32_t strenght = 0;
+		int32_t strength = 0;
 
 		// X-Pointers are N-64-bit estimations of the actual virtual adresss.
 		//
@@ -121,6 +120,6 @@ namespace vtil::symbolic
 
 		// Define reduction.
 		//
-		REDUCE_TO( flags, strenght, xpointer, base );
+		REDUCE_TO( flags, strength, xpointer, base );
 	};
 };

@@ -268,7 +268,7 @@ namespace vtil::symbolic
 
 		// Match the expresison.
 		//
-		stack_vector<symbol_table_t> results;
+		stack_vector<symbol_table_t, 4> results;
 		if ( !fast_match( &results, from, exp ) ) return {};
 
 		// If a filter is provided:
@@ -357,6 +357,11 @@ namespace vtil::symbolic
 				// checked the conditions.
 				//
 				fassert( exp_new );
+
+				// Make sure the size matches.
+				//
+				if ( exp_new->size() != exp->size() )
+					error( "Directive '%s' => '%s' left the simplifier unbalanced.", from->to_string(), to->to_string() );
 
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				// Log state and return the expression.

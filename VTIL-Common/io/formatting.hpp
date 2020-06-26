@@ -115,7 +115,7 @@ namespace vtil::format
 			{
 				if ( in.starts_with( str ) )
 					return fix_type_name( in.substr( strlen( str ) ) );
-				for ( int i = 0; i < in.size(); i++ )
+				for ( size_t i = 0; i < in.size(); i++ )
 				{
 					if ( in[ i ] == '<' && in.substr( i + 1 ).starts_with( str ) )
 						in = in.substr( 0, i + 1 ) + in.substr( i + 1 + strlen( str ) );
@@ -223,7 +223,7 @@ namespace vtil::format
 		}
 		// If container:
 		//
-		else if constexpr ( is_random_access_v<T> )
+		else if constexpr ( is_random_access_v<T> && !impl::has_to_string<T>::apply() )
 		{
 			size_t n = dynamic_size( x );
 			std::string result = "{";

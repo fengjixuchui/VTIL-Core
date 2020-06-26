@@ -54,7 +54,7 @@
 // Determine the maximum size of types we should inline.
 //
 #ifndef VTIL_VARIANT_INLINE_LIMIT
-	#define VTIL_VARIANT_INLINE_LIMIT 0x100
+	#define VTIL_VARIANT_INLINE_LIMIT 32
 #endif
 
 namespace vtil
@@ -171,7 +171,7 @@ namespace vtil
 
 		// Assignment by move/copy both reset current value and redirect to constructor.
 		//
-		variant& operator=( variant&& vo ) { reset(); return *new ( this ) variant( std::move( vo ) ); }
+		variant& operator=( variant&& vo ) noexcept { reset(); return *new ( this ) variant( std::move( vo ) ); }
 		variant& operator=( const variant& o ) { reset(); return *new ( this ) variant( o ); }
 
 		// Variant does not have a value if the copy field is null.

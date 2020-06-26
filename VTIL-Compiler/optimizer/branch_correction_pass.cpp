@@ -48,10 +48,6 @@ namespace vtil::optimizer
 		//
 		cached_tracer local_tracer = {};
 		auto lbranch_info = aux::analyze_branch( blk, &local_tracer, false, false );
-		ctracer.mtx.lock();
-		for ( auto& [k, v] : local_tracer.cache )
-			ctracer.cache[ k ] = v;
-		ctracer.mtx.unlock();
 		auto branch_info = aux::analyze_branch( blk, &ctracer, xblock );
 
 		// If branching to real, assert single next block.
@@ -102,7 +98,7 @@ namespace vtil::optimizer
 		//
 		if ( branch_info.is_jcc && 
 			 lbranch_info.is_jcc && 
-			 *branch->base == ins::jmp )
+			 branch->base == &ins::jmp )
 		{
 			// Attempts to revive an expression via cache.
 			//
@@ -177,19 +173,35 @@ namespace vtil::optimizer
 						fail = true;
 						break;
 					}
-					out = std::move(op);
+					out = std::move( op );
 				}
 
 				// If we converted all succesfully:
 				//
 				if ( !fail )
 				{
-					branch->base = &ins::js;
-					branch->operands = { 
-						op_cc.get(),
-						dsts[ 0 ].get(),
-						dsts[ 1 ].get()
-					};
+					operand cc_op = op_cc.get();
+
+					if ( cc_op.is_immediate() )
+					{
+						branch->base = &ins::jmp;
+						branch->operands = {
+							( cc_op.imm().u64 & 1 )
+							? dsts[ 0 ].get()
+							: dsts[ 1 ].get()
+						};
+					}
+					else
+					{
+						cc_op.reg().bit_count = 1;
+
+						branch->base = &ins::js;
+						branch->operands = {
+							cc_op,
+							dsts[ 0 ].get(),
+							dsts[ 1 ].get()
+						};
+					}
 					cnt++;
 				}
 			}
@@ -199,7 +211,7 @@ namespace vtil::optimizer
 		//
 		if ( branch_info.destinations.size() == 1 &&
 			 branch_info.destinations[ 0 ].is_constant() &&
-			 ( *branch->base == ins::jmp || *branch->base == ins::vxcall || *branch->base == ins::vexit ) &&
+			 ( branch->base == &ins::jmp || branch->base == &ins::vxcall || branch->base == &ins::vexit ) &&
 			 branch->operands[ 0 ].is_register() )
 		{
 
@@ -227,6 +239,7 @@ namespace vtil::optimizer
 
 			// Return counter as is.
 			//
+			rtn->flush_paths();
 			return cnt;
 		}
 		return 0;

@@ -66,8 +66,8 @@ namespace vtil
 
 			// Path restriction state.
 			//
+			const std::unordered_set<const container_type*>* paths_allowed = nullptr;
 			bool is_path_restricted = false;
-			std::set<container_type*> paths_allowed;
 
 			// Default constructor and the block-bound constructor.
 			//
@@ -75,13 +75,7 @@ namespace vtil
 			riterator_base( container_type* ref, const iterator_type& i ) 
 				: container( ref ), iterator_type( i ) {}
 			template<typename X, typename Y> riterator_base( const riterator_base<X, Y>& o ) 
-				: container( o.container ), iterator_type( Y( o ) ) 
-			{
-				// If path restricted, copy paths.
-				//
-				if ( is_path_restricted = o.is_path_restricted )
-					paths_allowed = { o.paths_allowed.begin(), o.paths_allowed.end() };
-			}
+				: container( o.container ), iterator_type( Y( o ) ), is_path_restricted( o.is_path_restricted ), paths_allowed( o.paths_allowed ) {}
 
 			// Override equality operators to check container first.
 			//
@@ -94,39 +88,6 @@ namespace vtil
 			bool is_begin() const { return !container || ((const iterator_type&)*this)==container->stream.begin(); }
 			bool is_valid() const { return !is_begin() || !is_end(); }
 
-			// Simple helper used to trace paths towards a container.
-			//
-			static std::set<container_type*> path_to( container_type* src, container_type* dst,
-													  bool forward, std::set<container_type*> path = {} )
-			{
-				// If we've already tried this path, fail.
-				//
-				if ( path.find( src ) != path.end() )
-					return {};
-
-				// Insert <src> into path.
-				//
-				path.insert( src );
-
-				// If we reached our destination, report success.
-				//
-				if ( src == dst )
-					return path;
-
-				// Otherwise, recurse.
-				//
-				std::set<container_type*> paths_allowed;
-				for ( container_type* blk : ( forward ? src->next : src->prev ) )
-				{
-					// If path ended up at destination, mark all paths "allowed".
-					//
-					std::set<container_type*> path_taken = path_to( blk, dst, forward, path );
-					if ( !path_taken.empty() )
-						paths_allowed.insert( path_taken.begin(), path_taken.end() );
-				}
-				return paths_allowed;
-			}
-
 			// Restricts the way current iterator can recurse in, making sure
 			// every path leads up-to the container specified (or none).
 			//
@@ -138,28 +99,16 @@ namespace vtil
 			}
 			riterator_base& restrict_path( container_type* dst, bool forward )
 			{
-				// Trace the path.
-				//
-				std::set<container_type*> trace = path_to( container, dst, forward );
-				
-				// If path is already restricted:
+				// Path should not be already restricted.
 				//
 				if ( is_path_restricted )
-				{
-					// Any allowed path should be allowed in both now. 
-					//
-					std::set<container_type*> path_intersection;
-					std::set_intersection( trace.begin(), trace.end(), 
-										   paths_allowed.begin(), paths_allowed.end(), 
-										   std::inserter( path_intersection, path_intersection.begin() ) );
-					paths_allowed = path_intersection;
-				}
-				else
-				{
-					// Set as the current allowed paths list.
-					//
-					paths_allowed = trace;
-				}
+					unreachable();
+				
+				// Set as the current allowed paths list.
+				//
+				paths_allowed = forward
+					? &container->owner->path_cache[ 0 ][ container ][ dst ]
+					: &container->owner->path_cache[ 1 ][ dst ][ container ];
 
 				// Declare the current iterator path restricted.
 				//
@@ -172,7 +121,7 @@ namespace vtil
 			riterator_base& clear_restrictions() 
 			{
 				is_path_restricted = false;
-				paths_allowed.clear();
+				paths_allowed = nullptr;
 				return *this;
 			}
 
@@ -187,7 +136,7 @@ namespace vtil
 				{
 					// Skip if path is restricted and this path is not allowed.
 					//
-					if ( is_path_restricted && paths_allowed.find( dst ) == paths_allowed.end() )
+					if ( is_path_restricted && ( !paths_allowed || paths_allowed->find( dst ) == paths_allowed->end() ) )
 						continue;
 
 					// Otherwise create the new iterator, inheriting the path restrictions 
@@ -291,7 +240,7 @@ namespace vtil
 		// Constructor does not exist. Should be created either using
 		// ::begin(...) or ->fork(...).
 		//
-		static basic_block* begin( vip_t entry_vip );
+		static basic_block* begin( vip_t entry_vip, architecture_identifier arch_id = architecture_amd64 );
 		basic_block* fork( vip_t entry_vip );
 
 		// Helpers for the allocation of unique temporary registers.
@@ -347,6 +296,8 @@ namespace vtil
 		WRAP_LAZY( rem );
 		WRAP_LAZY( irem );
 		WRAP_LAZY( popcnt );
+		WRAP_LAZY( bsf );
+		WRAP_LAZY( bsr );
 		WRAP_LAZY( bnot );
 		WRAP_LAZY( bshr );
 		WRAP_LAZY( bshl );

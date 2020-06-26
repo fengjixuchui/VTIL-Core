@@ -31,6 +31,7 @@
 #include <type_traits>
 #include <functional>
 #include <vtil/utility>
+#include "../arch/identifier.hpp"
 #include "instruction.hpp"
 #include "call_convention.hpp"
 
@@ -44,19 +45,30 @@ namespace vtil
 	//
 	struct routine
 	{
-		// This structure cannot be copied without a call to ::clone().
-		//
-		routine() = default;
-		routine( const routine& ) = delete;
-		routine& operator=( const routine& ) = delete;
-
 		// Mutex guarding the whole structure, more information on thread-safety can be found at basic_block.hpp.
 		//
 		mutable critical_section mutex;
 
+		// Physical architecture routine is bound to.
+		//
+		architecture_identifier arch_id;
+
+		// Constructed from architecture identifier.
+		//
+		routine( architecture_identifier arch_id ) : arch_id( arch_id ) {};
+
+		// This structure cannot be copied without a call to ::clone().
+		//
+		routine( const routine& ) = delete;
+		routine& operator=( const routine& ) = delete;
+
 		// Cache of explored blocks, mapping virtual instruction pointer to the basic block structure.
 		//
 		std::map<vip_t, basic_block*> explored_blocks;
+
+		// Cache of paths from block A to block B.
+		//
+		std::map<const basic_block*, std::map<const basic_block*, std::unordered_set<const basic_block*>>> path_cache[ 2 ];
 
 		// Reference to the first block, entry point.
 		// - Can be accessed without acquiring the mutex as it will be assigned strictly once.
@@ -67,13 +79,13 @@ namespace vtil
 		//
 		std::atomic<uint64_t> last_internal_id = { 0 };
 
-		// Calling convention of the routine.
+		// Calling convention of the routine. (TODO: Remove hard-coded amd64 ref)
 		//
-		call_convention routine_convention = preserve_all_convention;
+		call_convention routine_convention = amd64::default_call_convention;
 
-		// Calling convention of a non-specialized VXCALL.
+		// Calling convention of a non-specialized VXCALL. (TODO: Remove hard-coded amd64 ref)
 		//
-		call_convention subroutine_convention = default_call_convention;
+		call_convention subroutine_convention = amd64::default_call_convention;
 
 		// Convention of specialized calls, maps the vip of the VXCALL instruction onto the convention used.
 		//
@@ -125,6 +137,14 @@ namespace vtil
 			std::lock_guard _g( mutex );
 			spec_subroutine_conventions[ vip ] = cc;
 		}
+
+		// Explores the given path, reserved for internal use.
+		//
+		void explore_path( const basic_block* src, const basic_block* dst );
+
+		// Flushes the path cache, reserved for internal use.
+		//
+		void flush_paths();
 
 		// Routine structures free all basic blocks they own upon their destruction.
 		//

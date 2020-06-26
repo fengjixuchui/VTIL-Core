@@ -79,7 +79,7 @@ namespace vtil::symbolic
 		expression() = default;
 		expression( expression&& exp ) = default;
 		expression( const expression & exp ) = default;
-		expression& operator=( expression&& exp )= default;
+		expression& operator=( expression&& exp ) = default;
 		expression& operator=( const expression & exp ) = default;
 
 		// Construct from constants.

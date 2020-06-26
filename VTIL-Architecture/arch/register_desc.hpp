@@ -29,7 +29,9 @@
 #include <string>
 #include <vtil/math>
 #include <vtil/utility>
-#include <vtil/amd64> // TODO: Remove me.
+#include <vtil/amd64>
+#include <vtil/arm64>
+#include "identifier.hpp"
 
 namespace vtil
 {
@@ -90,13 +92,21 @@ namespace vtil
 	{
 		// Flags of the current register, as described in "enum register_flag".
 		//
-		uint32_t flags;
+		uint32_t flags = 0;
 
 		// Arbitrary identifier, is intentionally not universally unique to let ids of user registers make use
 		// of the full 64-bit range as otherwise we'd have to reserve some magic numbers for flags and stack pointer. 
 		// Due to this reason, flags should also be compared when doing comparison.
 		//
-		uint64_t local_id;
+		union
+		{
+			struct
+			{
+				uint64_t local_id     : 56;
+				uint64_t architecture : 8;
+			};
+			uint64_t combined_id = 0;
+		};
 		
 		// Size of the register in bits.
 		//
@@ -104,7 +114,7 @@ namespace vtil
 
 		// Offset at which we read from the full 64-bit version.
 		//
-		bitcnt_t bit_offset;
+		bitcnt_t bit_offset = 0;
 
 		// Default constructor / move / copy.
 		//
@@ -116,20 +126,20 @@ namespace vtil
 
 		// Construct a fully formed register.
 		//
-		register_desc( uint32_t flags, uint64_t id, bitcnt_t bit_count, bitcnt_t bit_offset = 0 )
-			: flags( flags ), local_id( id ), bit_count( bit_count ), bit_offset( bit_offset ) 
+		register_desc( uint32_t flags, uint64_t id, bitcnt_t bit_count, bitcnt_t bit_offset = 0, uint64_t architecture = 0 )
+			: flags( flags ), local_id( id ), bit_count( bit_count ), bit_offset( bit_offset ), architecture( architecture )
 		{ 
-			fassert( is_valid() ); 
+			is_valid( true );
 		}
 
 		// Returns whether the descriptor is valid or not.
 		//
-		bool is_valid() const 
-		{ 
+		bool is_valid( bool force = false ) const
+		{
+#define validate(...) { if( force ) fassert(__VA_ARGS__); else if( !(__VA_ARGS__) ) return false; }
 			// Validate bit count and offset.
 			//
-			if ( bit_count == 0 || ( bit_count + bit_offset ) > 64 )
-				return false;
+			validate( bit_count != 0 && ( bit_count + bit_offset ) <= 64 );
 
 			// Handle special registers:
 			//
@@ -141,13 +151,11 @@ namespace vtil
 			{
 				// Should be physical, non-volatile and writable.
 				//
-				if ( is_volatile() || is_read_only() || !is_physical() )
-					return false;
+				validate( !is_volatile() && is_physical() && !is_read_only() );
 
 				// Must have no local identifier.
 				//
-				if ( local_id != 0 )
-					return false;
+				validate( local_id == 0 );
 			}
 			// If register holds the flags:
 			//
@@ -155,13 +163,11 @@ namespace vtil
 			{
 				// Should be physical, non-volatile and writable.
 				//
-				if ( is_volatile() || is_read_only() || !is_physical() )
-					return false;
+				validate( !is_volatile() && is_physical() && !is_read_only() );
 
 				// Must have no local identifier.
 				//
-				if ( local_id != 0 )
-					return false;
+				validate( local_id == 0 );
 			}
 			// If register holds the image base:
 			//
@@ -169,13 +175,11 @@ namespace vtil
 			{
 				// Should be virtual, non-volatile and read-only.
 				//
-				if ( is_volatile() || !is_virtual() || !is_read_only() )
-					return false;
+				validate( !is_volatile() && is_virtual() && is_read_only() );
 
 				// Must have no local identifier.
 				//
-				if ( local_id != 0 )
-					return false;
+				validate( local_id == 0 );
 			}
 			// If register holds the [undefined] special:
 			//
@@ -183,24 +187,24 @@ namespace vtil
 			{
 				// Should be virtual, volatile and non-read-only.
 				//
-				if ( !is_volatile() || !is_virtual() || is_read_only() )
-					return false;
+				validate( is_volatile() && is_virtual() && !is_read_only() );
 
 				// Must have no local identifier.
 				//
-				if ( local_id != 0 )
-					return false;
+				validate( local_id == 0 );
 			}
 			// Otherwise must have no special flags.
 			//
-			else if( special_flags != 0 )
+			else
 			{
-				return false;
+				validate( special_flags == 0 );
 			}
 
 			// If register is physical, it can't be local.
 			//
-			return !is_physical() || !is_local();
+			validate( !is_physical() || !is_local() );
+			return true;
+#undef validate
 		}
 
 		// Simple helpers to determine some properties.
@@ -226,10 +230,13 @@ namespace vtil
 		//
 		bool overlaps( const register_desc& o ) const 
 		{ 
-			if ( local_id != o.local_id || flags != o.flags ) 
+			if ( combined_id != o.combined_id || flags != o.flags )
 				return false;
 			return get_mask() & o.get_mask();
 		}
+
+		// Returns the architecture this register belongs to.
+		//
 
 		// Conversion to human-readable format.
 		// - Note: Do not move this to a source file since we want the template we're using to be overriden!
@@ -260,15 +267,23 @@ namespace vtil
 			// Otherwise use the default naming.
 			//
 			if ( ( flags & register_physical ) )
-				#pragma warning(suppress: 4267)
-				return prefix + amd64::name( amd64::extend( math::narrow_cast<uint8_t>( local_id ) ) ) + suffix;
-			else
-				return prefix + "vr" + std::to_string( local_id ) + suffix;
+			{
+				switch ( architecture )
+				{
+					case architecture_amd64:
+						return prefix + amd64::name( amd64::extend( math::narrow_cast<uint8_t>( local_id ) ) ) + suffix;
+					case architecture_arm64:
+						return prefix + arm64::name( arm64::extend( math::narrow_cast<uint8_t>( local_id ) ) ) + suffix;
+					default:
+						unreachable();
+				}
+			}
+			return prefix + "vr" + std::to_string( local_id ) + suffix;
 		}
 
 		// Declare reduction.
 		//
-		REDUCE_TO( bit_count, local_id, flags, bit_offset );
+		REDUCE_TO( bit_count, combined_id, flags, bit_offset );
 	};
 
 	// Should be overriden by the user to describe conversion of the
@@ -289,6 +304,34 @@ namespace vtil
 	{
 		template<typename T>
 		auto operator()( T&& v ) { return std::forward<T>( v ); }
+	};
+	template<>
+	struct register_cast<x86_reg>
+	{
+		register_desc operator()( x86_reg value )
+		{
+			auto [base, offset, size] = amd64::resolve_mapping( value );
+			if ( base == X86_REG_RSP )
+				return { register_physical | register_stack_pointer, 0, size * 8, offset * 8            };
+			else if ( base == X86_REG_EFLAGS )													       
+				return { register_physical | register_flags,         0, size * 8, offset * 8            };
+			else
+				return { register_physical, ( uint64_t ) base, size * 8, offset * 8, architecture_amd64 };
+		}
+	};
+	template<>
+	struct register_cast<arm64_reg>
+	{
+		register_desc operator()( arm64_reg value )
+		{
+			auto [base, offset, size] = arm64::resolve_mapping( value );
+			if ( base == ARM64_REG_SP )
+				return { register_physical | register_stack_pointer, 0, size * 8, offset * 8            };
+			else if ( base == ARM64_REG_NZCV )
+				return { register_physical | register_flags,         0, size * 8, offset * 8            };
+			else
+				return { register_physical, ( uint64_t ) base, size * 8, offset * 8, architecture_arm64 };
+		}
 	};
 
 	// VTIL special registers.

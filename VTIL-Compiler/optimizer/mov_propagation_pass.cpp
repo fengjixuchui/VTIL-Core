@@ -41,16 +41,16 @@ namespace vtil::optimizer
 
 		// Override tracer.
 		//
-		symbolic::expression trace( symbolic::variable lookup ) override
+		symbolic::expression trace( const symbolic::variable& lookup ) override
 		{
 			// If at bypass point or at the end (due to recursion, invoke original).
 			//
 			if ( lookup.at == bypass || lookup.at.is_end() )
-				return cached_tracer::trace( std::move( lookup ) );
+				return cached_tracer::trace( lookup );
 
 			// If at move:
 			//
-			if ( *lookup.at->base == ins::mov )
+			if ( lookup.at->base == &ins::mov )
 			{
 				// If destination is overlapping lookup variable:
 				//
