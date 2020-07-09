@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -171,12 +171,25 @@ namespace vtil
 
 			// Iterace each entry in the range:
 			//
-			auto it_min = value_map.lower_bound( offset_fn{}( weaken_pointer{}( ptr ), -64 / 8 ) );
+			pointer_unit min_ptr = offset_fn{}( weaken_pointer{}( ptr ), -64 / 8 );
+			auto it_min = value_map.lower_bound( min_ptr );
 			if ( it_min == value_map.end() ) return std::nullopt;
-			auto it_max = value_map.upper_bound( offset_fn{}( ptr, size / 8 ) );
+
+			pointer_unit max_ptr = offset_fn{}( ptr, size / 8 );
+			auto it_max = value_map.upper_bound( max_ptr );
 			if ( it_min == it_max ) return std::nullopt;
+
 			for ( auto it = it_min; it != it_max; it++ )
 			{
+				// If we've reached the end, rotate back to the beginning,
+				// this handles overflows in pointers.
+				//
+				/*if ( it == value_map.end() )
+				{
+					it = value_map.begin();
+					it_max = value_map.lower_bound( min_ptr );
+				}*/
+				
 				// Calculate displacement, if unknown return unknown.
 				// = [RL - WL]
 				//

@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -31,6 +31,13 @@
 
 namespace vtil::optimizer::aux
 {
+	struct branch_analysis_flags
+	{
+		uint32_t cross_block    : 1 = false;
+		uint32_t pack           : 1 = false;
+		uint32_t resolve_opaque : 1 = false;
+	};
+
 	// Simple structure describing branch details.
 	//
 	struct branch_info
@@ -68,5 +75,5 @@ namespace vtil::optimizer::aux
 	// Extracts the details of the branch taken at the end of the block where possible.
 	// - CC&1 responsibility is left to the caller.
 	//
-	branch_info analyze_branch( const basic_block* blk, tracer* tracer, bool xblock, bool pack = true );
+	branch_info analyze_branch( const basic_block* blk, tracer* tracer, branch_analysis_flags flags );
 }

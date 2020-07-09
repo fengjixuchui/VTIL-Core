@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -49,6 +49,10 @@ namespace vtil::arm64
 	// Structure describing how a register maps to another register in aarch64.
 	//
 	using register_mapping = vtil::register_mapping<arm64_reg>;
+
+	// List of all physical registers and the base registers they map to <0> at offset <1> of size <2>.
+	//
+	extern const std::map<arm64_reg, register_mapping> register_mappings;
 
 	// Gets the offset<0> and size<1> of the mapping for the given register.
 	//

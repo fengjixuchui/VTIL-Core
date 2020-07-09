@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -154,10 +154,10 @@ namespace vtil
         //
         /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
         /*                                          [Name]        [Operands...]                                     [ASizeOp]   [Volatile]  [Operator]               [BranchOps] [MemOps]     */
-        inline const instruction_desc js =         { "js",        { o::read_reg,   o::read_any,     o::read_any  }, 2,          false,        {},                     { 2, 3 },    {}          };
-        inline const instruction_desc jmp =        { "jmp",       { o::read_any                                  }, 1,          false,        {},                     { 1 },       {}          };
-        inline const instruction_desc vexit =      { "vexit",     { o::read_any                                  }, 1,          false,        {},                     { -1 },      {}          };
-        inline const instruction_desc vxcall =     { "vxcall",    { o::read_any                                  }, 1,          false,        {},                     { -1 },      {}          };
+        inline const instruction_desc js =         { "js",        { o::read_reg,   o::read_any,     o::read_any  }, 2,          false,      {},                      { 2, 3 },    {}          };
+        inline const instruction_desc jmp =        { "jmp",       { o::read_any                                  }, 1,          false,      {},                      { 1 },       {}          };
+        inline const instruction_desc vexit =      { "vexit",     { o::read_any                                  }, 1,          false,      {},                      { -1 },      {}          };
+        inline const instruction_desc vxcall =     { "vxcall",    { o::read_any                                  }, 1,          false,      {},                      { -1 },      {}          };
         /*------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------*/
 
         //    -- Special instructions

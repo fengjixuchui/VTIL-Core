@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -26,7 +26,7 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <set>
+#include <vector>
 #include "../arch/register_desc.hpp"
 
 namespace vtil
@@ -39,17 +39,17 @@ namespace vtil
 		// List of registers that may change as a result of the routine execution but
 		// will be considered trashed.
 		//
-		std::set<register_desc> volatile_registers = {};
+		std::vector<register_desc> volatile_registers = {};
 
 		// List of regsiters that this routine wlil read from as a way of taking arguments.
 		// - Any additional arguments will be passed at [$sp + shadow_space + n*8]
 		//
-		std::set<register_desc> param_registers = {};
+		std::vector<register_desc> param_registers = {};
 
 		// List of registers that are used to store the return value of the routine and
 		// thus will change during routine execution but must be considered "used" by return.
 		//
-		std::set<register_desc> retval_registers = {};
+		std::vector<register_desc> retval_registers = {};
 
 		// Register that is generally used to store the stack frame if relevant.
 		//
@@ -149,121 +149,118 @@ namespace vtil
 		//
 		static const call_convention preserve_all_convention = {
 			/*.volatile_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
-				{ register_physical, ARM64_REG_X8,  64 }, { register_physical, ARM64_REG_X9,  64 },
-				{ register_physical, ARM64_REG_X10, 64 }, { register_physical, ARM64_REG_X11, 64 },
-				{ register_physical, ARM64_REG_X12, 64 }, { register_physical, ARM64_REG_X13, 64 },
-				{ register_physical, ARM64_REG_X14, 64 }, { register_physical, ARM64_REG_X15, 64 },
-				{ register_physical, ARM64_REG_X16, 64 }, { register_physical, ARM64_REG_X17, 64 },
-				{ register_physical, ARM64_REG_X18, 64 }, { register_physical, ARM64_REG_X19, 64 },
-				{ register_physical, ARM64_REG_X20, 64 }, { register_physical, ARM64_REG_X21, 64 },
-				{ register_physical, ARM64_REG_X22, 64 }, { register_physical, ARM64_REG_X23, 64 },
-				{ register_physical, ARM64_REG_X24, 64 }, { register_physical, ARM64_REG_X25, 64 },
-				{ register_physical, ARM64_REG_X26, 64 }, { register_physical, ARM64_REG_X27, 64 },
-				{ register_physical, ARM64_REG_X28, 64 }, { register_physical, ARM64_REG_X29, 64 },
-				{ register_physical, ARM64_REG_X30, 64 }, { register_physical, ARM64_REG_SP,  64 },
-				REG_FLAGS,
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X8, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X9, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X10, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X11, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X12, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X13, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X14, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X15, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X16, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X17, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X18, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X19, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X20, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X21, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X22, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X23, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X24, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X25, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X26, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X27, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X28, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X30, 64, 0, architecture_arm64 }, REG_FLAGS,
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },
-				{ register_physical, ARM64_REG_V8,  128 }, { register_physical, ARM64_REG_V9,  128 },
-				{ register_physical, ARM64_REG_V10, 128 }, { register_physical, ARM64_REG_V11, 128 },
-				{ register_physical, ARM64_REG_V12, 128 }, { register_physical, ARM64_REG_V13, 128 },
-				{ register_physical, ARM64_REG_V14, 128 }, { register_physical, ARM64_REG_V15, 128 },
-				{ register_physical, ARM64_REG_V16, 128 }, { register_physical, ARM64_REG_V17, 128 },
-				{ register_physical, ARM64_REG_V18, 128 }, { register_physical, ARM64_REG_V19, 128 },
-				{ register_physical, ARM64_REG_V20, 128 }, { register_physical, ARM64_REG_V21, 128 },
-				{ register_physical, ARM64_REG_V22, 128 }, { register_physical, ARM64_REG_V23, 128 },
-				{ register_physical, ARM64_REG_V24, 128 }, { register_physical, ARM64_REG_V25, 128 },
-				{ register_physical, ARM64_REG_V26, 128 }, { register_physical, ARM64_REG_V27, 128 },
-				{ register_physical, ARM64_REG_V28, 128 }, { register_physical, ARM64_REG_V28, 128 },
-				{ register_physical, ARM64_REG_V30, 128 }, { register_physical, ARM64_REG_V31, 128 }*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V8, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V9, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V10, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V11, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V12, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V13, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V14, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V15, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V16, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V17, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V18, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V19, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V20, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V21, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V22, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V23, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V24, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V25, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V26, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V27, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V30, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V31, 128, 0, architecture_arm64 }*/
 			},
 
 			/*.param_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
-				{ register_physical, ARM64_REG_X8,  64 }, { register_physical, ARM64_REG_X9,  64 },
-				{ register_physical, ARM64_REG_X10, 64 }, { register_physical, ARM64_REG_X11, 64 },
-				{ register_physical, ARM64_REG_X12, 64 }, { register_physical, ARM64_REG_X13, 64 },
-				{ register_physical, ARM64_REG_X14, 64 }, { register_physical, ARM64_REG_X15, 64 },
-				{ register_physical, ARM64_REG_X16, 64 }, { register_physical, ARM64_REG_X17, 64 },
-				{ register_physical, ARM64_REG_X18, 64 }, { register_physical, ARM64_REG_X19, 64 },
-				{ register_physical, ARM64_REG_X20, 64 }, { register_physical, ARM64_REG_X21, 64 },
-				{ register_physical, ARM64_REG_X22, 64 }, { register_physical, ARM64_REG_X23, 64 },
-				{ register_physical, ARM64_REG_X24, 64 }, { register_physical, ARM64_REG_X25, 64 },
-				{ register_physical, ARM64_REG_X26, 64 }, { register_physical, ARM64_REG_X27, 64 },
-				{ register_physical, ARM64_REG_X28, 64 }, { register_physical, ARM64_REG_X29, 64 },
-				{ register_physical, ARM64_REG_X30, 64 }, { register_physical, ARM64_REG_SP,  64 },
-				REG_FLAGS,
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X8, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X9, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X10, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X11, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X12, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X13, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X14, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X15, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X16, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X17, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X18, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X19, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X20, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X21, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X22, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X23, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X24, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X25, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X26, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X27, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X28, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X30, 64, 0, architecture_arm64 }, REG_FLAGS,
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },
-				{ register_physical, ARM64_REG_V8,  128 }, { register_physical, ARM64_REG_V9,  128 },
-				{ register_physical, ARM64_REG_V10, 128 }, { register_physical, ARM64_REG_V11, 128 },
-				{ register_physical, ARM64_REG_V12, 128 }, { register_physical, ARM64_REG_V13, 128 },
-				{ register_physical, ARM64_REG_V14, 128 }, { register_physical, ARM64_REG_V15, 128 },
-				{ register_physical, ARM64_REG_V16, 128 }, { register_physical, ARM64_REG_V17, 128 },
-				{ register_physical, ARM64_REG_V18, 128 }, { register_physical, ARM64_REG_V19, 128 },
-				{ register_physical, ARM64_REG_V20, 128 }, { register_physical, ARM64_REG_V21, 128 },
-				{ register_physical, ARM64_REG_V22, 128 }, { register_physical, ARM64_REG_V23, 128 },
-				{ register_physical, ARM64_REG_V24, 128 }, { register_physical, ARM64_REG_V25, 128 },
-				{ register_physical, ARM64_REG_V26, 128 }, { register_physical, ARM64_REG_V27, 128 },
-				{ register_physical, ARM64_REG_V28, 128 }, { register_physical, ARM64_REG_V28, 128 },
-				{ register_physical, ARM64_REG_V30, 128 }, { register_physical, ARM64_REG_V31, 128 }*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V8, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V9, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V10, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V11, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V12, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V13, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V14, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V15, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V16, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V17, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V18, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V19, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V20, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V21, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V22, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V23, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V24, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V25, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V26, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V27, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V30, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V31, 128, 0, architecture_arm64 }*/
 			},
 
 			/*.retval_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
-				{ register_physical, ARM64_REG_X8,  64 }, { register_physical, ARM64_REG_X9,  64 },
-				{ register_physical, ARM64_REG_X10, 64 }, { register_physical, ARM64_REG_X11, 64 },
-				{ register_physical, ARM64_REG_X12, 64 }, { register_physical, ARM64_REG_X13, 64 },
-				{ register_physical, ARM64_REG_X14, 64 }, { register_physical, ARM64_REG_X15, 64 },
-				{ register_physical, ARM64_REG_X16, 64 }, { register_physical, ARM64_REG_X17, 64 },
-				{ register_physical, ARM64_REG_X18, 64 }, { register_physical, ARM64_REG_X19, 64 },
-				{ register_physical, ARM64_REG_X20, 64 }, { register_physical, ARM64_REG_X21, 64 },
-				{ register_physical, ARM64_REG_X22, 64 }, { register_physical, ARM64_REG_X23, 64 },
-				{ register_physical, ARM64_REG_X24, 64 }, { register_physical, ARM64_REG_X25, 64 },
-				{ register_physical, ARM64_REG_X26, 64 }, { register_physical, ARM64_REG_X27, 64 },
-				{ register_physical, ARM64_REG_X28, 64 }, { register_physical, ARM64_REG_X29, 64 },
-				{ register_physical, ARM64_REG_X30, 64 }, { register_physical, ARM64_REG_SP,  64 },
-				REG_FLAGS,
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X8, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X9, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X10, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X11, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X12, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X13, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X14, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X15, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X16, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X17, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X18, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X19, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X20, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X21, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X22, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X23, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X24, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X25, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X26, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X27, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X28, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X30, 64, 0, architecture_arm64 }, REG_FLAGS,
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },
-				{ register_physical, ARM64_REG_V8,  128 }, { register_physical, ARM64_REG_V9,  128 },
-				{ register_physical, ARM64_REG_V10, 128 }, { register_physical, ARM64_REG_V11, 128 },
-				{ register_physical, ARM64_REG_V12, 128 }, { register_physical, ARM64_REG_V13, 128 },
-				{ register_physical, ARM64_REG_V14, 128 }, { register_physical, ARM64_REG_V15, 128 },
-				{ register_physical, ARM64_REG_V16, 128 }, { register_physical, ARM64_REG_V17, 128 },
-				{ register_physical, ARM64_REG_V18, 128 }, { register_physical, ARM64_REG_V19, 128 },
-				{ register_physical, ARM64_REG_V20, 128 }, { register_physical, ARM64_REG_V21, 128 },
-				{ register_physical, ARM64_REG_V22, 128 }, { register_physical, ARM64_REG_V23, 128 },
-				{ register_physical, ARM64_REG_V24, 128 }, { register_physical, ARM64_REG_V25, 128 },
-				{ register_physical, ARM64_REG_V26, 128 }, { register_physical, ARM64_REG_V27, 128 },
-				{ register_physical, ARM64_REG_V28, 128 }, { register_physical, ARM64_REG_V28, 128 },
-				{ register_physical, ARM64_REG_V30, 128 }, { register_physical, ARM64_REG_V31, 128 }*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V8, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V9, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V10, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V11, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V12, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V13, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V14, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V15, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V16, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V17, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V18, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V19, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V20, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V21, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V22, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V23, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V24, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V25, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V26, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V27, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V30, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V31, 128, 0, architecture_arm64 }*/
 			},
 
 			/*.frame_register =*/
-			{ register_physical, ARM64_REG_X29, 64 },
+			{ register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
 
 			/*.shadow_space =*/
 			0x0,
@@ -274,52 +271,52 @@ namespace vtil
 
 		static const call_convention default_call_convention = {
 			/*.volatile_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
-				{ register_physical, ARM64_REG_X8,  64 }, { register_physical, ARM64_REG_X9,  64 },
-				{ register_physical, ARM64_REG_X10, 64 }, { register_physical, ARM64_REG_X11, 64 },
-				{ register_physical, ARM64_REG_X12, 64 }, { register_physical, ARM64_REG_X13, 64 },
-				{ register_physical, ARM64_REG_X14, 64 }, { register_physical, ARM64_REG_X15, 64 },
-				{ register_physical, ARM64_REG_X16, 64 }, { register_physical, ARM64_REG_X17, 64 },
-				{ register_physical, ARM64_REG_X18, 64 }, REG_FLAGS,
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X8, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X9, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X10, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X11, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X12, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X13, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X14, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X15, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X16, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X17, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X18, 64, 0, architecture_arm64 }, REG_FLAGS,
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },
-				{ register_physical, ARM64_REG_V16, 128 }, { register_physical, ARM64_REG_V17, 128 },
-				{ register_physical, ARM64_REG_V18, 128 }, { register_physical, ARM64_REG_V19, 128 },
-				{ register_physical, ARM64_REG_V20, 128 }, { register_physical, ARM64_REG_V21, 128 },
-				{ register_physical, ARM64_REG_V22, 128 }, { register_physical, ARM64_REG_V23, 128 },
-				{ register_physical, ARM64_REG_V24, 128 }, { register_physical, ARM64_REG_V25, 128 },
-				{ register_physical, ARM64_REG_V26, 128 }, { register_physical, ARM64_REG_V27, 128 },
-				{ register_physical, ARM64_REG_V28, 128 }, { register_physical, ARM64_REG_V28, 128 },
-				{ register_physical, ARM64_REG_V30, 128 }, { register_physical, ARM64_REG_V31, 128 },*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V16, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V17, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V18, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V19, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V20, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V21, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V22, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V23, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V24, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V25, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V26, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V27, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V30, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V31, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.param_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.retval_registers =*/ {
-				{ register_physical, ARM64_REG_X0, 64 },
-				/*{ register_physical, ARM64_REG_V0, 128 },*/
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 },
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.frame_register =*/
-			{ register_physical, ARM64_REG_X29, 64 },
+			{ register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
 
 			/*.shadow_space =*/
 			0x0,
@@ -330,55 +327,55 @@ namespace vtil
 
 		static const call_convention vector_call_convention = {
 			/*.volatile_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
-				{ register_physical, ARM64_REG_X8,  64 }, { register_physical, ARM64_REG_X9,  64 },
-				{ register_physical, ARM64_REG_X10, 64 }, { register_physical, ARM64_REG_X11, 64 },
-				{ register_physical, ARM64_REG_X12, 64 }, { register_physical, ARM64_REG_X13, 64 },
-				{ register_physical, ARM64_REG_X14, 64 }, { register_physical, ARM64_REG_X15, 64 },
-				{ register_physical, ARM64_REG_X16, 64 }, { register_physical, ARM64_REG_X17, 64 },
-				{ register_physical, ARM64_REG_X18, 64 }, REG_FLAGS,
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X8, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X9, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X10, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X11, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X12, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X13, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X14, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X15, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X16, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X17, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X18, 64, 0, architecture_arm64 }, REG_FLAGS,
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },
-				{ register_physical, ARM64_REG_V16, 128 }, { register_physical, ARM64_REG_V17, 128 },
-				{ register_physical, ARM64_REG_V18, 128 }, { register_physical, ARM64_REG_V19, 128 },
-				{ register_physical, ARM64_REG_V20, 128 }, { register_physical, ARM64_REG_V21, 128 },
-				{ register_physical, ARM64_REG_V22, 128 }, { register_physical, ARM64_REG_V23, 128 },
-				{ register_physical, ARM64_REG_V24, 128 }, { register_physical, ARM64_REG_V25, 128 },
-				{ register_physical, ARM64_REG_V26, 128 }, { register_physical, ARM64_REG_V27, 128 },
-				{ register_physical, ARM64_REG_V28, 128 }, { register_physical, ARM64_REG_V28, 128 },
-				{ register_physical, ARM64_REG_V30, 128 }, { register_physical, ARM64_REG_V31, 128 },*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V16, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V17, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V18, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V19, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V20, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V21, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V22, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V23, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V24, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V25, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V26, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V27, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V28, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V30, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V31, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.param_registers =*/ {
-				{ register_physical, ARM64_REG_X0,  64 }, { register_physical, ARM64_REG_X1,  64 },
-				{ register_physical, ARM64_REG_X2,  64 }, { register_physical, ARM64_REG_X3,  64 },
-				{ register_physical, ARM64_REG_X4,  64 }, { register_physical, ARM64_REG_X5,  64 },
-				{ register_physical, ARM64_REG_X6,  64 }, { register_physical, ARM64_REG_X7,  64 },
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X1, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X2, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X3, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X4, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X5, 64, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_X6, 64, 0, architecture_arm64 }, { register_physical, ARM64_REG_X7, 64, 0, architecture_arm64 },
 
 				/* SIMD */
-				/*{ register_physical, ARM64_REG_V0,  128 }, { register_physical, ARM64_REG_V1,  128 },
-				{ register_physical, ARM64_REG_V2,  128 }, { register_physical, ARM64_REG_V3,  128 },
-				{ register_physical, ARM64_REG_V4,  128 }, { register_physical, ARM64_REG_V5,  128 },
-				{ register_physical, ARM64_REG_V6,  128 }, { register_physical, ARM64_REG_V7,  128 },*/
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V4, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V5, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V6, 128, 0, architecture_arm64 }, { register_physical, ARM64_REG_V7, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.retval_registers =*/ {
-				{ register_physical, ARM64_REG_X0, 64 },
-				/*{ register_physical, ARM64_REG_V0, 128 },
-				{ register_physical, ARM64_REG_V1, 128 },
-				{ register_physical, ARM64_REG_V2, 128 },
-				{ register_physical, ARM64_REG_V3, 128 },*/
+				{ register_physical, ARM64_REG_X0, 64, 0, architecture_arm64 },
+				/*{ register_physical, ARM64_REG_V0, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V1, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V2, 128, 0, architecture_arm64 },
+				{ register_physical, ARM64_REG_V3, 128, 0, architecture_arm64 },*/
 			},
 
 			/*.frame_register =*/
-			{ register_physical, ARM64_REG_X29, 64 },
+			{ register_physical, ARM64_REG_X29, 64, 0, architecture_arm64 },
 
 			/*.shadow_space =*/
 			0x0,

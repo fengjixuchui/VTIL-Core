@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -29,6 +29,7 @@
 #include <string>
 #include <cstring>
 #include <type_traits>
+#include <chrono>
 #include "../util/concept.hpp"
 #include "../util/lt_typeid.hpp"
 #include "../util/dynamic_size.hpp"
@@ -78,7 +79,7 @@ namespace vtil::format
 			static auto f( T v ) -> decltype( std::to_string( v ) );
 		};
 
-		// Check if type is convertable to string using T.to_string()
+		// Check if type is convertable to string using T.to_string().
 		//
 		template<typename... D>
 		struct has_to_string : concept_base<has_to_string, D...>
@@ -86,6 +87,13 @@ namespace vtil::format
 			template<typename T>
 			static auto f( T v ) -> decltype( v.to_string() );
 		};
+
+		// Check if type is a chrono duration.
+		//
+		template <typename types>
+		static constexpr bool is_duration_v = false;
+		template <typename... types>
+		static constexpr bool is_duration_v<std::chrono::duration<types...>> = true;
 
 		// Returns a temporary but valid const (w)char* for the given std::(w)string.
 		//
@@ -182,6 +190,32 @@ namespace vtil::format
 		else if constexpr ( std::is_same_v<base_type, const wchar_t*> )
 		{
 			return as_string( std::wstring{ x } );
+		}
+		else if constexpr ( impl::is_duration_v<base_type> )
+		{
+			static constexpr auto flt2str = [ ] ( float f ) -> std::string
+			{
+				char buf[ 32 ];
+				sprintf_s( buf, "%.2f", f );
+				return buf;
+			};
+
+			static constexpr std::tuple<base_type, const char*, bool> durations[] = 
+			{
+				{ std::chrono::duration_cast<base_type>( std::chrono::hours{ 1 } ),        "hrs",  false },
+				{ std::chrono::duration_cast<base_type>( std::chrono::minutes{ 1 } ),      "min",  false },
+				{ std::chrono::duration_cast<base_type>( std::chrono::seconds{ 1 } ),      "sec",  false },
+				{ std::chrono::duration_cast<base_type>( std::chrono::milliseconds{ 1 } ), "ms",   false },
+				{ std::chrono::duration_cast<base_type>( std::chrono::nanoseconds{ 1 } ),  "ns",   true  },
+			};
+
+			for ( auto& [dur, name, last] : durations )
+				if ( last || x > dur )
+					return flt2str( x.count() / float( dur.count() ) ) + name;
+
+			// Should not be reached, but unreachable() relies on formatting so abort instead.
+			//
+			abort();
 		}
 		else
 		{

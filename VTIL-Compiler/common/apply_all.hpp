@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -32,6 +32,8 @@
 #include "../optimizer/bblock_extension_pass.hpp"
 #include "../optimizer/stack_propagation_pass.hpp"
 #include "../optimizer/dead_code_elimination_pass.hpp"
+#include "../optimizer/fast_dead_code_elimination_pass.hpp"
+#include "../optimizer/fast_propagation_pass.hpp"
 #include "../optimizer/mov_propagation_pass.hpp"
 #include "../optimizer/symbolic_rewrite_pass.hpp"
 #include "../optimizer/branch_correction_pass.hpp"
@@ -42,31 +44,51 @@ namespace vtil::optimizer
 	// TODO: Add a wrapping validation pass.
 	//
 
+	// Fast local passes.
+	//
+
+	using fast_local_passes = nop_pass; /* exhaust_pass<
+		//fast_local_dead_code_elimination_pass,
+		//fast_reg_propagation_pass,
+		//fast_mem_propagation_pass,
+		zero_pass<//fast_local_dead_code_elimination_pass>
+	>;*/
+
 	// Initial routine correction passes.
 	//
 	using collective_routine_correction_pass = combine_pass<
 		stack_pinning_pass,
 		istack_ref_substitution_pass,
+		//fast_local_passes,
 		branch_correction_pass,
-		bblock_extension_pass
+		bblock_extension_pass//,
+		//fast_dead_code_elimination_pass
 	>;
 
 	// Exhaustive propagation pass.
 	//
 	using collective_propagation_pass = exhaust_pass<
+		//fast_local_passes,
+		//fast_dead_code_elimination_pass,
 		stack_propagation_pass,
+		//fast_local_passes,
 		local_pass<mov_propagation_pass>,
+		//fast_local_passes,
+		//fast_dead_code_elimination_pass,
 		local_pass<dead_code_elimination_pass>,
 		mov_propagation_pass,
+		//fast_local_passes,
 		register_renaming_pass,
 		dead_code_elimination_pass,
 		conditional_pass<
 			branch_correction_pass,
 			conditional_pass<
-				bblock_extension_pass, 
+				bblock_extension_pass,
 				symbolic_rewrite_pass<true>
 			>
-		>
+		>//,
+		//fast_local_passes,
+		//fast_dead_code_elimination_pass
 	>;
 
 	// Cross optimization pass.
@@ -79,7 +101,11 @@ namespace vtil::optimizer
 		exhaust_pass<
 			conditional_pass<
 				symbolic_rewrite_pass<false>,
-				collective_propagation_pass
+				exhaust_pass<
+					//fast_local_passes,
+					//fast_dead_code_elimination_pass,
+					collective_propagation_pass
+				>
 			>
 		>,
 		stack_pinning_pass
@@ -90,9 +116,11 @@ namespace vtil::optimizer
 	using collective_local_pass = combine_pass<
 		stack_pinning_pass,
 		istack_ref_substitution_pass,
+		//fast_local_passes,
 		stack_propagation_pass,
 		symbolic_rewrite_pass<true>,
 		exhaust_pass<
+			//fast_local_passes,
 			mov_propagation_pass,
 			register_renaming_pass
 		>

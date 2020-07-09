@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -69,12 +69,12 @@ namespace vtil::symbolic
 			//
 			else
 			{
-				// If speculative condition parsing no need to build an expression, simplfy
+				// If speculative condition parsing no need to build an expression, simply
 				// check if all operands can also be speculatively built.
 				//
 				if ( speculative_condition )
 				{
-					if ( dir->lhs && !translate( sym, dir->lhs, bit_cnt, true, max_depth ) ) return {};
+					if ( dir->lhs && !translate( sym, dir->lhs, 0, true, max_depth ) ) return {};
 					if ( !translate( sym, dir->rhs, bit_cnt, true, max_depth ) ) return {};
 					return dummy_expression;
 				}
@@ -361,7 +361,12 @@ namespace vtil::symbolic
 				// Make sure the size matches.
 				//
 				if ( exp_new->size() != exp->size() )
+				{
+					log( "\n" );
+					log<CON_RED>( "Input  (%d bits):   %s\n", exp->size(), exp->to_string() );
+					log<CON_RED>( "Output (%d bits):   %s\n", exp_new->size(), exp_new->to_string() );
 					error( "Directive '%s' => '%s' left the simplifier unbalanced.", from->to_string(), to->to_string() );
+				}
 
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				// Log state and return the expression.

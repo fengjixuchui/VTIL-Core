@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -33,7 +33,7 @@
 
 namespace vtil::symbolic::directive
 {
-    // Directive variables with mathching constraints:
+    // Directive variables with matching constraints:
     //
     enum matching_type
     {
@@ -251,6 +251,10 @@ namespace vtil::symbolic::directive
     static instance __mask_unk( const instance& a ) { return { tagged<directive_op_desc::mask_unknown>, a }; }
     static instance __mask_knw1( const instance& a ) { return { tagged<directive_op_desc::mask_one>, a }; }
     static instance __mask_knw0( const instance& a ) { return { tagged<directive_op_desc::mask_zero>, a }; }
+
+    // Changes the characteristics of the first variable to match the second.
+    //
+    static instance c( const instance& o, const instance& i ) { return { o.id, o.lookup_index, i.mtype }; }
 };
 
 // Implement comparison operators between [directive::directive_op_desc] x [math::operator_id].

@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -47,8 +47,12 @@ namespace vtil::optimizer
 		// Analyse the branch first locally, next globally.
 		//
 		cached_tracer local_tracer = {};
-		auto lbranch_info = aux::analyze_branch( blk, &local_tracer, false, false );
-		auto branch_info = aux::analyze_branch( blk, &ctracer, xblock );
+		auto lbranch_info = aux::analyze_branch( blk, &local_tracer, {} );
+		ctracer.mtx.lock();
+		for ( auto& [k, v] : local_tracer.cache )
+			ctracer.cache[ k ] = v;
+		ctracer.mtx.unlock();
+		auto branch_info = aux::analyze_branch( blk, &ctracer, { .cross_block = true, .pack = true, .resolve_opaque = true } );
 
 		// If branching to real, assert single next block.
 		//
@@ -69,13 +73,13 @@ namespace vtil::optimizer
 				// Check if this destination is plausible or not.
 				//
 				vip_t target = ( *it )->entry_vip;
-				bool impossible = true;
+				bool plausible = false;
 				for ( auto& branch : branch_info.destinations )
-					impossible &= ( branch != target ).get<bool>().value_or( false );
+					plausible |= ( branch == target ).get<bool>().value_or( true );
 
 				// If it is not:
 				//
-				if ( impossible )
+				if ( !plausible )
 				{
 					// Delete prev and next links.
 					//
@@ -181,27 +185,14 @@ namespace vtil::optimizer
 				if ( !fail )
 				{
 					operand cc_op = op_cc.get();
+					cc_op.reg().bit_count = 1;
 
-					if ( cc_op.is_immediate() )
-					{
-						branch->base = &ins::jmp;
-						branch->operands = {
-							( cc_op.imm().u64 & 1 )
-							? dsts[ 0 ].get()
-							: dsts[ 1 ].get()
-						};
-					}
-					else
-					{
-						cc_op.reg().bit_count = 1;
-
-						branch->base = &ins::js;
-						branch->operands = {
-							cc_op,
-							dsts[ 0 ].get(),
-							dsts[ 1 ].get()
-						};
-					}
+					branch->base = &ins::js;
+					branch->operands = {
+						cc_op,
+						dsts[ 0 ].get(),
+						dsts[ 1 ].get()
+					};
 					cnt++;
 				}
 			}
@@ -229,13 +220,40 @@ namespace vtil::optimizer
 		{
 			// Delete non-referenced blocks entirely.
 			//
-			for ( auto it = rtn->explored_blocks.begin(); it != rtn->explored_blocks.end(); )
+			bool repeat;
+			do
 			{
-				if ( it->second->prev.size() == 0 && it->second != rtn->entry_point )
-					it = rtn->explored_blocks.erase( it );
-				else
-					++it;
+				repeat = false;
+
+				for ( auto it = rtn->explored_blocks.begin(); it != rtn->explored_blocks.end(); )
+				{
+					if ( it->second->prev.size() == 0 && it->second != rtn->entry_point )
+					{
+						// For each destination:
+						//
+						for ( auto& block : it->second->next )
+						{
+							// Remove the link.
+							//
+							block->prev.erase( std::remove( block->prev.begin(), block->prev.end(), it->second ), block->prev.end() );
+							
+							// If no prev link left, repeat logic.
+							//
+							repeat |= block->prev.empty();
+						}
+
+						// Erase block.
+						//
+						it = rtn->explored_blocks.erase( it );
+					}
+					else
+					{
+						++it;
+					}
+				}
+				
 			}
+			while ( repeat );
 
 			// Return counter as is.
 			//

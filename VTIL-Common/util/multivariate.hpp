@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -76,7 +76,7 @@ namespace vtil
 		const void purge() const
 		{
 			std::lock_guard _g{ mtx };
-			database.erase( lt_typeid<T>::value );
+			database.erase( lt_typeid_v<T> );
 		}
 
 		// Checks if we have the type in the store.
@@ -85,7 +85,7 @@ namespace vtil
 		const bool has() const
 		{
 			std::lock_guard _g{ mtx };
-			return database.contains( lt_typeid<T>::value );
+			return database.contains( lt_typeid_v<T> );
 		}
 
 		// Functional getter, if variant is already in the database will return
@@ -101,12 +101,12 @@ namespace vtil
 			// default construct it and reference that instead.
 			//
 			std::lock_guard _g{ mtx };
-			variant& var = database[ lt_typeid<T>::value ];
+			variant& var = database[ lt_typeid_v<T> ];
 			if( !var ) var = T{};
 			return var.get<T>();
 		}
 		template<typename T>
-		T& get() { return const_cast< T& >( ( ( const multivariate* ) this )->get<T>() ); }
+		T& get() { return const_cast<T&>( ( ( const multivariate* ) this )->get<T>() ); }
 
 		// Allows for convinient use of the type in the format of:
 		// - block_cache& cache = multivariate;

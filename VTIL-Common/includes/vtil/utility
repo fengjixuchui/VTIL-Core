@@ -1,7 +1,7 @@
 #pragma once
 #include "../../util/concept.hpp"
 #include "../../util/copy_on_write.hpp"
-#include "../../util/critical_section.hpp"
+#include "../../util/thread_identifier.hpp"
 #include "../../util/lt_typeid.hpp"
 #include "../../util/fnv64.hpp"
 #include "../../util/fnv128.hpp"
@@ -20,3 +20,16 @@
 #include "../../util/conditional_lock.hpp"
 #include "../../util/numeric_iterator.hpp"
 #include "../../util/multivariate.hpp"
+#include "../../util/static_warning.hpp"
+#include "../../util/random.hpp"
+#include "../../util/profiler.hpp"
+
+// VTIL namespace should be able to use literals by default without having to include it.
+//
+#include <chrono>
+#include <xstring>
+namespace vtil
+{
+	using namespace std::literals::string_literals;
+	using namespace std::literals::chrono_literals;
+};

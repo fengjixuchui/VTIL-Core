@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -97,7 +97,7 @@ namespace vtil::symbolic
 
 	// Construct from symbolic expression.
 	//
-	pointer::pointer( expression&& _base ) : base( std::move( _base ) )
+	pointer::pointer( const expression& _base ) : base( _base.simplify() )
 	{
 		// Determine pointer strength and the flags.
 		//
@@ -128,7 +128,7 @@ namespace vtil::symbolic
 		//
 		for ( auto [xptr, key] : zip( xpointer, xpointer_keys ) )
 		{
-			xptr = base.get( [ k = uint64_t( key ) ]( const unique_identifier& uid )
+			xptr = base.get( [ k = uint64_t( key >> 1 ) ]( const unique_identifier& uid )
 			{
 				// Hash the identifier of the value with the current key and mask it.
 				//

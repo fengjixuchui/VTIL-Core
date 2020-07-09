@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -483,7 +483,7 @@ namespace vtil::optimizer::aux
 	// Returns each possible branch destination of the given basic block in the format of:
 	// - [is_real, target] x N
 	//
-	branch_info analyze_branch( const basic_block* blk, tracer* tracer, bool xblock, bool pack )
+	branch_info analyze_branch( const basic_block* blk, tracer* tracer, branch_analysis_flags flags )
 	{
 		// If block is not complete, return empty vector.
 		//
@@ -494,10 +494,9 @@ namespace vtil::optimizer::aux
 		//
 		const auto trace = [ & ] ( symbolic::variable&& lookup )
 		{
-			auto exp = xblock
-				? tracer->rtrace( std::move( lookup ) )
-				: tracer->trace( std::move( lookup ) );
-			if ( pack )   exp = symbolic::variable::pack_all( exp );
+			auto exp = tracer->trace( std::move( lookup ) );
+			if ( flags.cross_block ) exp = tracer->rtrace_exp( std::move( exp ) );
+			if ( flags.pack )        exp = symbolic::variable::pack_all( exp );
 			return exp;
 		};
 
@@ -543,7 +542,7 @@ namespace vtil::optimizer::aux
 						}
 						else if ( ( exp.value.unknown_mask() | exp.value.known_one() ) == 1 )
 						{
-							if ( !cnd_out.is_valid() )
+							if ( !cnd_out.is_valid() && !exp.is_constant() )
 								cnd_out = exp;
 						}
 						else if ( exp.is_variable() && exp.uid.get<symbolic::variable>().is_memory() )
@@ -556,38 +555,40 @@ namespace vtil::optimizer::aux
 					{
 						if ( exp.op == math::operator_id::value_if )
 						{
-							if ( exp.lhs->equals( cnd_out ) )
+							if ( exp.lhs->is_identical( cnd_out ) )
 							{
 								exp = state ? *exp.rhs : 0;
-								confirmed = true;
+								confirmed |= !state;
 							}
-							else if ( exp.lhs->equals( ~cnd_out ) )
+							else if ( exp.lhs->is_identical( ~cnd_out ) )
 							{
 								exp = state ? 0 : *exp.rhs;
-								confirmed = true;
+								confirmed |= !state;
 							}
 						}
 						else if ( ( exp.value.unknown_mask() | exp.value.known_one() ) == 1 )
 						{
-							if ( exp.equals( cnd_out ) )
+							if ( exp.is_identical( cnd_out ) )
 							{
 								exp = { state, exp.size() };
-								confirmed = true;
+								confirmed |= !state;
 							}
-							else if ( exp.equals( ~cnd_out ) )
+							else if ( exp.is_identical( ~cnd_out ) )
 							{
 								exp = { state ^ 1, exp.size() };
-								confirmed = true;
+								confirmed |= !state;
 							}
 						}
 						else if ( exp.is_variable() && exp.uid.get<symbolic::variable>().is_memory() )
 						{
 							auto& var = exp.uid.get<symbolic::variable>();
 						
-							bool xblock_org = xblock;
-							xblock = false;
+							// Disable cross block tracing while we trace the pointer.
+							//
+							branch_analysis_flags orig_flags = flags;
+							flags.cross_block = false;
 							symbolic::pointer exp_ptr = var.mem().decay().clone().transform( transform_cc );
-							xblock = xblock_org;
+							flags = orig_flags;
 
 							if ( exp_ptr != var.mem().base )
 								exp = trace( symbolic::variable{ std::next( var.at ), { exp_ptr, var.mem().bit_count } } );
@@ -595,7 +596,7 @@ namespace vtil::optimizer::aux
 					};
 
 					dst.enumerate( explore_cc_space );
-					dst.transform( transform_cc );
+					if ( cnd_out ) dst.transform( transform_cc );
 					if ( !confirmed ) cnd_out = {};
 				};
 
@@ -640,7 +641,7 @@ namespace vtil::optimizer::aux
 			// If condition can be resolved in compile time:
 			//
 			symbolic::expression cc = trace( { branch, branch->operands[ 0 ].reg() } );
-			if ( cc.is_constant() )
+			if ( flags.resolve_opaque && cc.is_constant() )
 			{
 				// Redirect to jmp resolver.
 				//

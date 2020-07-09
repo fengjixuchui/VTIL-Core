@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -192,9 +192,44 @@ namespace vtil::symbolic::directive
 
         // Simplify manual sign extension.
         //
-        { __ucast(A,B)|(__ucast((0x1+~(A>>U)), B)<<C),       __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
-        { __ucast(A,B)|((~(__ucast(A,B)>>U)+0x1)<<C),        __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
-        { (((((~(A>>B))|-0x2)+0x1)<<U)|A),                   __iff((U==(B+1))&(__bcnt(A)!=1), __cast(__ucast(A,U),__bcnt(A))) },
+        { __ucast(A,B)|(__ucast((0x1+~(A>>U)), B)<<C),        __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
+        { __ucast(A,B)|((~(__ucast(A,B)>>U)+0x1)<<C),         __iff((B>__bcnt(A))&(U==(__bcnt(A)-1))&(C==__bcnt(A))&(__bcnt(A)!=1), __cast(A,B)) },
+        { (((((~(A>>B))|-0x2)+0x1)<<U)|A),                    __iff((U==(B+1))&(__bcnt(A)!=1), __cast(__ucast(A,U),__bcnt(A))) },
+       
+        /*// Prefer immediates with their real sign. 
+        //
+        { A+U,                                               __iff(U<0, A-!(-U)) },
+        { A-U,                                               __iff(U<0, A+!(-U)) },
+
+        // MUL simplification.
+        //
+        { (-A)*(-B),                                         A*B },
+        { A*~B,                                              (-A)*B-A },
+
+        // MBA normalization.
+        //
+        { A*(B|C),                                           A*(B+C)-A*(B&C) },
+        { A*(B^C),                                           A*(B+C)-A*((B&C)<<1) },
+        { A+(B|C),                                           (A+B+C)-(B&C) },
+        { A+(B^C),                                           (A+B+C)-((B&C)<<1) },
+        { (B|C)-A,                                           (B+C-A)-(B&C) },
+        { (B^C)-A,                                           (B+C-A)-((B&C)<<1) },
+		{ A-(B|C),                                           (A-B-C)+(B&C) },
+        { A-(B^C),                                           (A-B-C)+((B&C)<<1) },
+        { A*(B+C),                                           A*B+A*C },
+        { A*(B-C),                                           A*B-A*C },
+        { A*(B&~C),                                          A*B+(-A)*(B&C) },
+          
+        // MBA to bitwise.
+        //
+        { A-(A&B),                                           A&~B },
+        { A+(B&~A),                                          A|B },
+        { (A+B)+((A&B)*-2),                                  A^B },
+        { (A+B)-((A&B)*2),                                   A^B },
+        { (A+B)-((A&B)<<1),                                  A^B },
+        { (A-B)+((~A&B)*2),                                  A^B },
+        { (A-B)+((~A&B)<<1),                                 A^B },
+        { U-(c(X,U)&B),                                      U&!(~X|~B) },*/
     };
 
     // Describes the way operands of two operators join each other.
@@ -213,7 +248,7 @@ namespace vtil::symbolic::directive
 
         // -- Special OR substitute to ADD:
         //
-        { A+B,                                                __iff( ((__mask_knw1(A)|__mask_unk(A))&(__mask_knw1(B)|__mask_unk(B)))==0u, A|B)},
+        { A+B,                                                __iff(((__mask_knw1(A)|__mask_unk(A))&(__mask_knw1(B)|__mask_unk(B)))==0u, A|B)},
 
         // ADD:
         //
@@ -259,6 +294,7 @@ namespace vtil::symbolic::directive
 
         // XOR:
         //
+        //{ A^(B&C),                                            s(~(B&!(A&C)))&s(A|(B&C)) }, 
         { A^(B&C),                                            s(A|(B&C))&s(~(B&!(A&C))) },
         { A^(B|C),                                            s(B|!(A|C))&s(~(A&(B|C))) },
         { A^(B^C),                                            B^!(A^C) },
@@ -321,10 +357,25 @@ namespace vtil::symbolic::directive
         { ~__rotl(A,C),                                       __rotl(!~A,C) },
         { ~__rotr(A,C),                                       __rotr(!~A,C) },
 
+        // MUL:
+        //
+        { (A+B)*C,                                           !(A*C)+s(B*C) },
+        { (A+B)*C,                                           s(A*C)+!(B*C) },
+        { (A-B)*C,                                           !(A*C)-s(B*C) },
+        { (A-B)*C,                                           s(A*C)-!(B*C) },
+        { A*(B*C),                                           !(A*C)*B },
+        { A*-B,                                              !(s(-A)*B) },
+        { (A*B)+(A*C),                                       A*!(B+C) },
+        { (A*B)-(A*C),                                       A*!(B-C) },
+
         // Lower immediate urem/udiv/mul into and/shr/shl where possible.
         //
         { A*U,                                                __iff(__popcnt(U)==1, A<<!(__bsf(U)-1)) },
         { A+(A<<U),                                           A*!(1 + (1<<U)) },
+        //{ B+A*U,                                              __iff(__popcnt(-U)==1, B-(A<<!(__bsf(-U)-1))) }, 
+        //{ B+(A<<U),                                           B+A*!(1<<U) }, 
+        //{ B-(A<<U),                                           B-A*!(1<<U) }, 
+        //{ B*(A<<U),                                           B*A*!(1<<U) }, 
         { urem(A,U),                                          __iff(__popcnt(U)==1, A&!(U-1)) },
         { udiv(A,U),                                          __iff(__popcnt(U)==1, A>>!(__bsf(U)-1)) },
 
@@ -355,6 +406,7 @@ namespace vtil::symbolic::directive
         { __if(__ugreat_eq(A,B),A)+__if(__uless(A,B),B),      __umax(A,B) },
         { (~(A+(-1)))&B,                                      __iff((__mask_unk(A)|__mask_knw1(A))==1u, __if(s(__ucast(A,1)),B)) },
         { (~(A-1))&B,                                         __iff((__mask_unk(A)|__mask_knw1(A))==1u, __if(s(__ucast(A,1)),B)) },
+        { (-A)&B,                                             __iff((__mask_unk(A)|__mask_knw1(A))==1u, __if(s(__ucast(A,1)),B)) },
         { ((A+(-1)))&B,                                       __iff((__mask_unk(A)|__mask_knw1(A))==1u, __if(s(__ucast(~A,1)),B)) },
         { ((A-1))&B,                                          __iff((__mask_unk(A)|__mask_knw1(A))==1u, __if(s(__ucast(~A,1)),B)) },
     };

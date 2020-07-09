@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -32,8 +32,8 @@
 #include <cstdlib>
 #include <string>
 #include <mutex>
+#include <functional>
 #include "formatting.hpp"
-#include "../util/critical_section.hpp"
 
 // If inline assembly is supported use it, otherwise rely on intrinsics to emit INT3.
 //
@@ -84,7 +84,7 @@ namespace vtil::logger
 	{
 		// Lock of the stream.
 		//
-		critical_section lock;
+		std::recursive_mutex lock;
 
 		// Whether prints are muted or not.
 		//
@@ -264,6 +264,11 @@ namespace vtil::logger
 		state::get()->padding = old_padding;
 	}
 
+	// Allows to place a hook onto the error function, this is mainly used for
+	// the python project to avoid crasing the process.
+	//
+	inline std::function<void( const std::string& )> error_hook;
+
 	// Prints an error message and breaks the execution.
 	//
 	template<typename... params>
@@ -275,6 +280,10 @@ namespace vtil::logger
 			fmt,
 			format::fix_parameter<params>( std::forward<params>( ps ) )...
 		);
+
+		// If there is an active hook, call into it.
+		//
+		if ( error_hook ) error_hook( message );
 
 		// Error will stop any execution so feel free to ignore any locks. Print error message.
 		//

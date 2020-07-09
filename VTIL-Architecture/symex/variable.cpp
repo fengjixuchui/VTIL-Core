@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -233,9 +233,9 @@ namespace vtil::symbolic
 		{
 			// If instruction accesses memory:
 			//
-			if ( ( write && it->base->writes_memory() ) ||
-				 ( read && it->base->reads_memory() ) ||
-				 ( !read && !write && it->base->accesses_memory() ) )
+			if ( it->base->accesses_memory() && 
+				 ( !write || it->base->memory_write ) &&
+				 ( !read || !it->base->memory_write ) )
 			{
 				// Generate an expression for the pointer.
 				//
@@ -288,6 +288,19 @@ namespace vtil::symbolic
 			{
 				auto& reg = var.reg();
 
+				// If $sp, indicate read from:
+				//
+				if ( reg.is_stack_pointer() )
+				{
+					if ( write ) return {};
+					return {
+							.bit_offset = 0,
+							.bit_count = reg.bit_count,
+							.read = true,
+							.write = false
+					};
+				}
+
 				// If exiting the virtual machine:
 				//
 				if ( it->base == &ins::vexit )
@@ -298,6 +311,7 @@ namespace vtil::symbolic
 					{
 						if ( retval.overlaps( reg ) )
 						{
+							if ( write ) return {};
 							return {
 								.bit_offset = retval.bit_offset - reg.bit_offset,
 								.bit_count = retval.bit_count,
@@ -313,10 +327,8 @@ namespace vtil::symbolic
 					{
 						if ( retval.overlaps( reg ) )
 						{
-							if ( !read )
-								return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
-							else
-								return {};
+							if ( read ) return {};
+							return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
 						}
 					}
 
@@ -324,14 +336,13 @@ namespace vtil::symbolic
 					//
 					if ( reg.is_virtual() )
 					{
-						if ( !read )
-							return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
-						else
-							return {};
+						if ( read ) return {};
+						return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
 					}
 
 					// Otherwise indicate read from.
 					//
+					if ( write ) return {};
 					return {
 						.bit_offset = 0,
 						.bit_count = reg.bit_count,
@@ -418,10 +429,8 @@ namespace vtil::symbolic
 					fill_displacement( &details, mem.base, pointer{ limit }, tracer, xblock );
 					if ( !details.is_unknown() && ( details.bit_offset + var.bit_count() ) <= 0 )
 					{
-						if ( !read )
-							return { .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
-						else
-							return {};
+						if ( read ) return {};
+						return { .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
 					}
 				}
 

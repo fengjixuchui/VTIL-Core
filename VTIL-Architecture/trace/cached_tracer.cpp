@@ -9,9 +9,9 @@
 // 2. Redistributions in binary form must reproduce the above copyright   
 //    notice, this list of conditions and the following disclaimer in the   
 //    documentation and/or other materials provided with the distribution.   
-// 3. Neither the name of mosquitto nor the names of its   
-//    contributors may be used to endorse or promote products derived from   
-//    this software without specific prior written permission.   
+// 3. Neither the name of VTIL Project nor the names of its contributors
+//    may be used to endorse or promote products derived from this software 
+//    without specific prior written permission.   
 //    
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
 // AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE   
@@ -109,23 +109,30 @@ namespace vtil
 		{
 			// If recursive flag is set, fix the expression:
 			//
-			if ( recursive_flag )
+			/*if ( recursive_flag )
 			{
 				symbolic::expression result = *it->second;
 				lock = {};
 
-				result.transform( [ & ] ( symbolic::expression& exp )
+				if ( result )
 				{
-					if ( exp.is_variable() )
+					result.transform( [ & ] ( symbolic::expression& exp )
 					{
-						auto& var = exp.uid.get<symbolic::variable>();
-						if ( !var.at.is_begin() )
-							exp = tracer::trace( var );
-					}
-				} );
+						if ( exp.is_variable() )
+						{
+							auto& var = exp.uid.get<symbolic::variable>();
+							if ( !var.at.is_begin() )
+								exp = tracer::trace( var );
+						}
+					} );
+				}
+				else
+				{
+					result = tracer::trace( lookup );
+				}
 
 				return result;
-			}
+			}*/
 
 			const symbolic::expression& result = *it->second;
 #if VTIL_OPT_TRACE_VERBOSE
