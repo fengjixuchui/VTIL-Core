@@ -33,6 +33,7 @@ namespace vtil
 	// Calculates the address of an inline object within the region [begin-end]
 	// with the given size and alignment properties.
 	//
+	template<bool get>
 	static uint64_t calc_inline_address( const void* begin, const void* end, size_t size, size_t align )
 	{
 		// Calculate inline boundaries. 
@@ -44,6 +45,10 @@ namespace vtil
 		//
 		uint64_t align_mask = align - 1;
 		uint64_t ptr_a = ( ptr + align_mask ) & ~align_mask;
+
+		// Skip overflow check if getter.
+		//
+		if constexpr ( get ) return ptr_a;
 
 		// If overflows, return null, else return the aligned address.
 		//
@@ -117,7 +122,7 @@ namespace vtil
 			{
 				// Redirect to the copy constructor.
 				//
-				new ( this ) variant( ( variant& ) src );
+				new ( this ) variant( ( const variant& ) src );
 
 				// Free the object stored in source.
 				//
@@ -132,7 +137,7 @@ namespace vtil
 			// Steal the stored external pointer.
 			//
 			is_inline = false;
-			ext = std::move( src.ext );
+			ext = src.ext;
 		}
 
 		// Inherit the inline/copy/destruction traits from source.
@@ -160,7 +165,7 @@ namespace vtil
 
 		// If object is inline, calculate the inline address, otherwise return the external pointer.
 		//
-		return is_inline ? calc_inline_address( inl, std::end( inl ), size, align ) : ( uint64_t ) ext;
+		return is_inline ? calc_inline_address<true>( inl, std::end( inl ), size, align ) : ( uint64_t ) ext;
 	}
 
 	// Allocates the space for an object of the given properties and returns the pointer.
@@ -169,7 +174,7 @@ namespace vtil
 	{
 		// Calculate the inline address, if successful reference the inline object.
 		//
-		if ( uint64_t inline_adr = calc_inline_address( inl, std::end( inl ), size, align ) )
+		if ( uint64_t inline_adr = calc_inline_address<false>( inl, std::end( inl ), size, align ) )
 		{
 			is_inline = true;
 			return ( void* ) inline_adr;

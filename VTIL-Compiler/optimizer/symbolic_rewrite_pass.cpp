@@ -34,10 +34,6 @@ namespace vtil::optimizer
 	//
 	size_t isymbolic_rewrite_pass::pass( basic_block* blk, bool xblock )
 	{
-		// Acquire shared mutex and create cached tracer.
-		//
-		cached_tracer ctracer = {};
-
 		// Determine the temporary sizes in the block.
 		//
 		std::map<std::pair<uint64_t, uint64_t>, bitcnt_t> temp_sizes;
@@ -140,7 +136,7 @@ namespace vtil::optimizer
 
 				// If register value is not used after this instruction, skip from emitted state.
 				//
-				if ( !aux::is_used( { std::prev( limit ), k }, false, &ctracer ) )
+				if ( !aux::is_used( { std::prev( limit ), k }, false, nullptr ) )
 					continue;
 				
 				// Try minimizing expression size.
@@ -254,7 +250,7 @@ namespace vtil::optimizer
 					// Try to extract the offset from the compound expression.
 					//
 					int64_t offset = 0;
-					symbolic::expression exp = symbolic::variable::pack_all( k.base ).simplify( true );
+					symbolic::expression exp = symbolic::variable::pack_all( *k.base ).simplify( true );
 					if ( !exp.is_constant() )
 					{
 						using namespace symbolic::directive;
@@ -305,6 +301,12 @@ namespace vtil::optimizer
 				temporary_block.stream.emplace_back( *limit );
 				it = std::next( limit );
 				temporary_block.sp_index = it.is_end() ? blk->sp_index : it->sp_index;
+			}
+			// Otherwise break from the loop.
+			//
+			else
+			{
+				break;
 			}
 
 			// Reset virtual machine state.
