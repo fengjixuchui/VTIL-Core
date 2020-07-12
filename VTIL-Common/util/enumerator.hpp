@@ -26,44 +26,41 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <chrono>
 #include <type_traits>
+#include "../io/asserts.hpp"
 
 namespace vtil
 {
-	// Times the callable given and returns pair [result, duration] if it has 
-	// a return value or just [duration].
+	// Declares a generic enumerator controller.
 	//
-	template<typename T>
-	static auto profile( T&& f )
+	struct enumerator
 	{
-		using result_t = decltype( std::declval<T>()() );
+		// Enumerator can return tagged orders using this type to control the loop.
+		//
+		struct tagged_order 
+		{ 
+			bool should_break = false;
+			bool global_break = false;
+		};
+		static constexpr tagged_order obreak =    { .should_break = true,  .global_break = false };
+		static constexpr tagged_order obreak_r =  { .should_break = true,  .global_break = true  };
+		static constexpr tagged_order ocontinue = { .should_break = false, .global_break = false };
 
-		if constexpr ( std::is_same_v<result_t, void> )
+		// Enumeratee should use this function to get order from any callee.
+		//
+		template<typename T, typename... Tx>
+		inline static tagged_order invoke( T&& fn, Tx&&... args )
 		{
-			auto t0 = std::chrono::steady_clock::now();
-			f();
-			auto t1 = std::chrono::steady_clock::now();
-			return t1 - t0;
-		}
-		else
-		{
+			using ret_type = decltype( fn( std::declval<Tx&&>()... ) );
 
-			auto t0 = std::chrono::steady_clock::now();
-			result_t res = f();
-			auto t1 = std::chrono::steady_clock::now();
-			return std::make_pair( res, t1 - t0 );
+			if constexpr ( std::is_same_v<ret_type, void> )
+				return fn( std::forward<Tx>( args )... ), ocontinue;
+			else if constexpr ( std::is_same_v<ret_type, tagged_order> )
+				return fn( std::forward<Tx>( args )... );
+			else
+				static_assert( sizeof( T ) == -1, "Enumerator should return void or valid order." );
+			
+			unreachable();
 		}
-	}
-
-	// Same as ::profile but ignores the return value and runs N times.
-	//
-	template<typename T>
-	static auto profile_n( T&& f, size_t n )
-	{
-		auto t0 = std::chrono::steady_clock::now();
-		while( n-- != 0 ) f();
-		auto t1 = std::chrono::steady_clock::now();
-		return t1 - t0;
-	}
+	};
 };

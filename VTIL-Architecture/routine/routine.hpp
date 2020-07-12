@@ -41,6 +41,11 @@ namespace vtil
 	//
 	struct basic_block;
 
+	// Declare types of path containers.
+	//
+	using path_set = std::unordered_set<const basic_block*, hasher<>>;
+	using path_map = std::unordered_map<const basic_block*, std::unordered_map<const basic_block*, path_set, hasher<>>, hasher<>>;
+
 	// Descriptor for any routine that is being translated.
 	//
 	struct routine
@@ -68,7 +73,7 @@ namespace vtil
 
 		// Cache of paths from block A to block B.
 		//
-		std::map<const basic_block*, std::map<const basic_block*, std::unordered_set<const basic_block*>>> path_cache[ 2 ];
+		path_map path_cache[ 2 ];
 
 		// Reference to the first block, entry point.
 		// - Can be accessed without acquiring the mutex as it will be assigned strictly once.
@@ -113,11 +118,13 @@ namespace vtil
 
 		// Invokes the enumerator passed for each basic block this routine contains.
 		//
-		void for_each( const std::function<void( basic_block* )>& enumerator )
+		template<typename T>
+		void for_each( T&& fn )
 		{
 			std::lock_guard _g( mutex );
 			for ( auto& [vip, block] : explored_blocks )
-				enumerator( block );
+				if ( enumerator::invoke( fn, block ).should_break )
+					return;
 		}
 
 		// Gets the calling convention for the given VIP (that resolves into VXCALL.
@@ -138,6 +145,20 @@ namespace vtil
 			spec_subroutine_conventions[ vip ] = cc;
 		}
 
+		// Gets (forward/backward) path from src to dst.
+		//
+		const path_set& get_path( const basic_block* src, const basic_block* dst ) const;
+		const path_set& get_path_bwd( const basic_block* src, const basic_block* dst ) const;
+
+		// Simple helpers to check if (forward/backward) path from src to dst exists.
+		//
+		bool has_path( const basic_block* src, const basic_block* dst ) const;
+		bool has_path_bwd( const basic_block* src, const basic_block* dst ) const;
+
+		// Checks whether the block is in a loop.
+		//
+		bool is_looping( const basic_block* blk ) const;
+
 		// Explores the given path, reserved for internal use.
 		//
 		void explore_path( const basic_block* src, const basic_block* dst );
@@ -145,6 +166,23 @@ namespace vtil
 		// Flushes the path cache, reserved for internal use.
 		//
 		void flush_paths();
+
+		// Deletes a block, should have no links or links must be nullified (no back-links).
+		//
+		void delete_block( basic_block* block );
+
+		// Enumerates every instruction in the routine forward/backward, within the boundaries if specified.
+		// -- @ routine_helpers.hpp
+		//
+		template<typename callback, typename iterator_type>
+		void enumerate( callback fn, const iterator_type& src, const iterator_type& dst = {} ) const;
+		template<typename callback, typename iterator_type>
+		void enumerate_bwd( callback fn, const iterator_type& src, const iterator_type& dst = {} ) const;
+
+		// Returns the number of basic blocks and instructions in the routine.
+		//
+		size_t num_blocks() const;
+		size_t num_instructions() const;
 
 		// Routine structures free all basic blocks they own upon their destruction.
 		//

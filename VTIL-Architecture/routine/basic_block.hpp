@@ -66,7 +66,7 @@ namespace vtil
 
 			// Path restriction state.
 			//
-			const std::unordered_set<const container_type*>* paths_allowed = nullptr;
+			const path_set* paths_allowed = nullptr;
 			bool is_path_restricted = false;
 
 			// Default constructor and the block-bound constructor.
@@ -107,8 +107,8 @@ namespace vtil
 				// Set as the current allowed paths list.
 				//
 				paths_allowed = forward
-					? &container->owner->path_cache[ 0 ][ container ][ dst ]
-					: &container->owner->path_cache[ 1 ][ dst ][ container ];
+					? &container->owner->get_path( container, dst )
+					: &container->owner->get_path_bwd( container, dst );
 
 				// Declare the current iterator path restricted.
 				//
@@ -132,6 +132,7 @@ namespace vtil
 				// Generate a list of possible iterators to continue from:
 				//
 				std::vector<riterator_base> output;
+				output.reserve( forward ? container->next.size() : container->prev.size() );
 				for ( container_type* dst : ( forward ? container->next : container->prev ) )
 				{
 					// Skip if path is restricted and this path is not allowed.
@@ -145,7 +146,7 @@ namespace vtil
 					riterator_base new_it = { dst,  forward ? dst->begin() : dst->end() };
 					new_it.paths_allowed = paths_allowed;
 					new_it.is_path_restricted = is_path_restricted;
-					output.push_back( new_it );
+					output.emplace_back( std::move( new_it ) );
 				}
 				return output;
 			}
@@ -156,8 +157,8 @@ namespace vtil
 			{
 				if ( !is_valid() ) return "invalid";
 				if ( is_end() )    return format::str( "end@block#%llx", container->entry_vip );
-				if ( is_begin() )  return format::str( "#0@block%llx", container->entry_vip );
-				else               return format::str( "#d@block%llx", std::distance( container->begin(), *this ), container->entry_vip );
+				if ( is_begin() )  return format::str( "begin@block%llx",   container->entry_vip );
+				else               return format::str( "#%04d@block%llx",   std::distance( container->begin(), *this ), container->entry_vip );
 			}
 
 			// Make hashable.

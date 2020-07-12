@@ -39,7 +39,7 @@ namespace vtil::optimizer
 
 		symbolic::expression trace( const symbolic::variable& lookup ) override
 		{
-			if( bypass )
+			if( bypass || lookup.at.is_end() )
 				return cached_tracer::trace( lookup );
 
 			// If iterator is at a str instruction and we're 
@@ -77,8 +77,8 @@ namespace vtil::optimizer
 				// If result is a non-local memory variable, invoke rtrace primitive.
 				//
 				auto& var = result.uid.get<symbolic::variable>();
-				if ( var.is_memory() && !aux::is_local( var.mem().decay() ) )
-					return tracer::rtrace( var, limit );
+				if ( var.is_memory() && !aux::is_local( *var.mem().decay() ) )
+					return cached_tracer::rtrace( var, limit );
 			}
 			return result;
 		}
@@ -118,22 +118,7 @@ namespace vtil::optimizer
 			// @ For each:
 			.for_each( [ & ] ( const il_iterator& it )
 			{
-				constexpr auto is_convertable = [ ] ( const symbolic::expression& exp )
-				{
-					// If not a single variable, fail.
-					//
-					if ( exp.is_expression() &&
-						 ( exp.op != math::operator_id::cast || !exp.lhs->is_variable() ) &&
-						 ( exp.op != math::operator_id::ucast || !exp.lhs->is_variable() ) )
-						return false;
-
-					// If memory variable, fail.
-					//
-					if ( exp.is_variable() && exp.uid.get<symbolic::variable>().is_memory() )
-						return false;
-					return true;
-				};
-				auto resize_and_pack = [ & ] ( symbolic::expression& exp )
+				auto resize_and_pack = [ & ] ( symbolic::expression::reference& exp )
 				{
 					exp = symbolic::variable::pack_all( exp.resize( it->operands[ 0 ].bit_count() ) );
 				};
@@ -142,7 +127,9 @@ namespace vtil::optimizer
 				//
 				symbolic::pointer ptr = { ltracer.cached_tracer::trace_p( { it, REG_SP } ) + it->memory_location().second };
 				symbolic::variable var = { it, { ptr, it->access_size() } };
-				symbolic::expression exp = xblock ? ltracer.rtrace( var ) : ltracer.cached_tracer::trace( var );
+				var.at.paths_allowed = &it.container->owner->get_path( it.container->owner->entry_point, it.container );
+				var.at.is_path_restricted = true;
+				symbolic::expression::reference exp = xblock ? ltracer.rtrace( var ) : ltracer.cached_tracer::trace( var );
 
 				// Resize and pack variables.
 				//
@@ -151,19 +138,19 @@ namespace vtil::optimizer
 				// Determine the instruction we will use to move the source.
 				//
 				auto* new_instruction = &ins::mov;
-				if ( exp.is_expression() )
+				if ( exp->is_expression() )
 				{
 					// If __ucast(V, N):
 					//
-					if ( exp.op == math::operator_id::ucast && exp.lhs->is_variable() )
+					if ( exp->op == math::operator_id::ucast && exp->lhs->is_variable() )
 					{
-						exp = exp.lhs->clone();
+						exp = exp->lhs;
 					}
 					// If __cast(V, N):
 					//
-					else if ( exp.op == math::operator_id::cast && exp.lhs->is_variable() )
+					else if ( exp->op == math::operator_id::cast && exp->lhs->is_variable() )
 					{
-						exp = exp.lhs->clone();
+						exp = exp->lhs;
 						new_instruction = &ins::movsx;
 					}
 					// Otherwise skip.
@@ -176,24 +163,23 @@ namespace vtil::optimizer
 
 				// If constant, replace with [mov reg, imm].
 				//
-				if ( auto imm = exp.get() )
+				if ( auto imm = exp->get() )
 				{
 					// Push to swap buffer.
 					//
-					ins_swap_buffer.emplace_back( it, new_instruction, operand{ *imm, exp.size() } );
+					ins_swap_buffer.emplace_back( it, new_instruction, operand{ *imm, exp->size() } );
 				}
 				// Otherwise, try to replace with [mov reg, reg].
 				//
 				else
 				{
-					fassert( exp.is_variable() );
+					fassert( exp->is_variable() );
 				
 					// Skip if not a register or branch dependant.
 					//
-					symbolic::variable& rvar = exp.uid.get<symbolic::variable>();
+					symbolic::variable rvar = exp->uid.get<symbolic::variable>();
 					if ( rvar.is_branch_dependant || !rvar.is_register() )
 						return;
-					register_desc reg = rvar.reg();
 
 					// If value is not alive, try hijacking the value declaration.
 					//
@@ -230,7 +216,7 @@ namespace vtil::optimizer
 					{
 						// Push to swap buffer.
 						//
-						ins_swap_buffer.emplace_back( it, new_instruction, operand{ reg } );
+						ins_swap_buffer.emplace_back( it, new_instruction, operand{ rvar.reg() } );
 					}
 				}
 			});
@@ -250,7 +236,10 @@ namespace vtil::optimizer
 		for ( auto [it, ins, var] : ins_revive_swap_buffer )
 		{
 			it->base = ins;
-			it->operands = { it->operands[ 0 ], aux::revive_register( var, it ) };
+
+			auto& rev = revive_list[ var ];
+			if ( !rev.is_valid() ) rev = aux::revive_register( var, it );
+			it->operands = { it->operands[ 0 ], rev };
 			it->is_valid( true );
 		}
 		return ins_swap_buffer.size() + ins_revive_swap_buffer.size();

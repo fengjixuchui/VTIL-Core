@@ -131,7 +131,7 @@ namespace vtil::optimizer
 				//
 				auto k = pair.first; auto v = pair.second.simplify();
 				symbolic::expression v0 = symbolic::make_register_ex( k );
-				if ( v0.equals( v ) )
+				if ( v->equals( v0 ) )
 					continue;
 
 				// If register value is not used after this instruction, skip from emitted state.
@@ -191,11 +191,11 @@ namespace vtil::optimizer
 
 				// Pack registers and the expression.
 				//
-				v = symbolic::variable::pack_all( v.simplify( true ) );
+				auto final_value = symbolic::variable::pack_all( v.simplify( true ) );
 
 				// Buffer a mov instruction.
 				//
-				instruction_buffer.push_back( { &ins::mov, { k, translator << v } } );
+				instruction_buffer.push_back( { &ins::mov, { k, translator << final_value } } );
 			}
 
 			// For each memory state:
@@ -208,7 +208,7 @@ namespace vtil::optimizer
 
 				// If value is unchanged, skip.
 				//
-				if ( v.equals( v0 ) )
+				if ( v->equals( v0 ) )
 					continue;
 
 				// Try minimizing expression size.
@@ -250,20 +250,20 @@ namespace vtil::optimizer
 					// Try to extract the offset from the compound expression.
 					//
 					int64_t offset = 0;
-					symbolic::expression exp = symbolic::variable::pack_all( *k.base ).simplify( true );
-					if ( !exp.is_constant() )
+					auto exp = symbolic::variable::pack_all( k.base ).simplify( true );
+					if ( !exp->is_constant() )
 					{
 						using namespace symbolic::directive;
 
 						std::vector<symbol_table_t> results;
 						if ( fast_match( &results, A + U, exp ) )
 						{
-							exp = *results.front().translate( A );
+							exp = results.front().translate( A );
 							offset = *results.front().translate( U )->get<int64_t>();
 						}
 						else if ( fast_match( &results, A - U, exp ) )
 						{
-							exp = *results.front().translate( A );
+							exp = results.front().translate( A );
 							offset = -*results.front().translate( U )->get<int64_t>();
 						}
 					}

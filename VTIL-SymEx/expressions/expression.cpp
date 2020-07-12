@@ -644,14 +644,14 @@ namespace vtil::symbolic
 			//
 			for ( auto& operand : { &lhs, &rhs } )
 			{
-				if ( *operand && operand->reference->is_expression() )
+				if ( *operand && operand->get()->is_expression() )
 				{
 					// Bitwise hint of the descriptor contains +1 or -1 if the operator
 					// is strictly bitwise or arithmetic respectively and 0 otherwise.
 					// This works since mulitplication between them will only be negative
 					// if the hints mismatch.
 					//
-					complexity *= 1 + math::sgn( operand->reference->get_op_desc()->hint_bitwise * desc->hint_bitwise );
+					complexity *= 1 + math::sgn( operand->get()->get_op_desc()->hint_bitwise * desc->hint_bitwise );
 				}
 			}
 			
@@ -691,7 +691,7 @@ namespace vtil::symbolic
 		// this way and additionally we avoid copying where an operand is being simplified
 		// as that can be replaced by a simple swap of shared references.
 		//
-		auto ref = make_local_reference( this );
+		reference ref = make_local_reference( this );
 		simplify_expression( ref, prettify );
 
 		// Only thing that we should be careful about is the case expression->simplify(),
@@ -702,8 +702,6 @@ namespace vtil::symbolic
 		//
 		if ( &*ref != this ) 
 			operator=( *ref );
-		else
-			fassert( ref.reference.use_count() == 1 );
 
 		// Set the simplifier hint to indicate skipping further calls to simplify_expression.
 		//
@@ -810,10 +808,11 @@ namespace vtil::symbolic
 	//
 	bool expression::is_identical( const expression& other ) const
 	{
-		// Propagate invalid.
+		// Propagate invalid and self.
 		//
 		if ( !is_valid() )            return !other.is_valid();
 		else if ( !other.is_valid() ) return false;
+		else if ( this == &other )    return true;
 
 		// If hash mismatch, return false without checking anything.
 		//
@@ -843,15 +842,12 @@ namespace vtil::symbolic
 
 		// If both sides match, return true.
 		//
-		if ( ( lhs == other.lhs || lhs->is_identical( *other.lhs ) ) &&
-			 ( rhs == other.rhs || rhs->is_identical( *other.rhs ) ))
+		if ( lhs->is_identical( *other.lhs ) && rhs->is_identical( *other.rhs ) )
 			return true;
 
 		// If not, check in reverse as well if commutative and return the final result.
 		//
-		return	desc->is_commutative && 
-				( lhs == other.rhs || lhs->is_identical( *other.rhs ) ) &&
-				( rhs == other.lhs || rhs->is_identical( *other.lhs ) );
+		return desc->is_commutative && lhs->is_identical( *other.rhs ) && rhs->is_identical( *other.lhs );
 	}
 
 	// Converts to human-readable format.
@@ -868,5 +864,72 @@ namespace vtil::symbolic
 		if ( is_constant() )      return format::hex( value.get<true>().value() );
 		if ( is_variable() )      return uid.to_string();
 		return "null";
+	}
+
+	// Implement some helpers to conditionally copy.
+	//
+	expression_reference& expression_reference::resize( bitcnt_t new_size, bool signed_cast, bool no_explicit )
+	{
+		if ( new_size != get()->size() )
+			own()->resize( new_size, signed_cast, no_explicit );
+		return *this;
+	}
+	expression_reference expression_reference::resize( bitcnt_t new_size, bool signed_cast, bool no_explicit ) const
+	{
+		return expression_reference{ *this }.resize( new_size, signed_cast, no_explicit );
+	}
+	expression_reference& expression_reference::simplify( bool prettify, bool* out )
+	{
+		if ( prettify || !get()->simplify_hint )
+			out ? *out = simplify_expression( *this, prettify ) : simplify_expression( *this, prettify );
+		return *this;
+	}
+	expression_reference expression_reference::simplify( bool prettify, bool* out ) const
+	{
+		return make_copy( *this ).simplify( prettify, out );
+	}
+	expression_reference& expression_reference::make_lazy()
+	{
+		if ( !get()->is_lazy )
+			own()->is_lazy = true;
+		return *this;
+	}
+	expression_reference expression_reference::make_lazy() const
+	{
+		return make_copy( *this ).make_lazy();
+	}
+
+	// Forward declared redirects for internal use cases.
+	//
+	hash_t expression_reference::hash() const
+	{
+		return get()->hash();
+	}
+	bool expression_reference::is_simple() const
+	{
+		return get()->simplify_hint;
+	}
+	void expression_reference::update( bool auto_simplify ) 
+	{
+		own()->update( auto_simplify );
+	}
+
+	// Equivalence check.
+	//
+	bool expression_reference::equals( const expression& exp ) const { return !is_valid() ? !exp : get()->equals( exp ); }
+	bool expression_reference::is_identical( const expression& exp ) const { return !is_valid() ? !exp : get()->is_identical( exp ); }
+
+	// Implemented for sinkhole use.
+	//
+	bitcnt_t expression_reference::size() const 
+	{ 
+		return get()->size(); 
+	}
+
+	// Implemented for logger use.
+	//
+	std::string expression_reference::to_string() const
+	{
+		return get()->to_string();
 	}
 };

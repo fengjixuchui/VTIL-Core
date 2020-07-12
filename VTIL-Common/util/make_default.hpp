@@ -26,44 +26,16 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <chrono>
 #include <type_traits>
 
 namespace vtil
 {
-	// Times the callable given and returns pair [result, duration] if it has 
-	// a return value or just [duration].
+	// A simple helper that creates a constant reference to the default constructed value of the type.
 	//
-	template<typename T>
-	static auto profile( T&& f )
+	template<typename T, auto... params>
+	inline static const T& make_default()
 	{
-		using result_t = decltype( std::declval<T>()() );
-
-		if constexpr ( std::is_same_v<result_t, void> )
-		{
-			auto t0 = std::chrono::steady_clock::now();
-			f();
-			auto t1 = std::chrono::steady_clock::now();
-			return t1 - t0;
-		}
-		else
-		{
-
-			auto t0 = std::chrono::steady_clock::now();
-			result_t res = f();
-			auto t1 = std::chrono::steady_clock::now();
-			return std::make_pair( res, t1 - t0 );
-		}
-	}
-
-	// Same as ::profile but ignores the return value and runs N times.
-	//
-	template<typename T>
-	static auto profile_n( T&& f, size_t n )
-	{
-		auto t0 = std::chrono::steady_clock::now();
-		while( n-- != 0 ) f();
-		auto t1 = std::chrono::steady_clock::now();
-		return t1 - t0;
+		static const T v = { params... };
+		return v;
 	}
 };

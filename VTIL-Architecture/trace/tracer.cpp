@@ -135,34 +135,38 @@ namespace vtil
 			return;
 		}
 
-		std::unordered_map<symbolic::variable, symbolic::expression, hasher<>> cache;
+		std::unordered_map<symbolic::variable, symbolic::expression::reference, hasher<>> cache;
 		cache.reserve( inout.depth );
-		inout.transform( [ &cache, &fn ] ( symbolic::expression& exp )
+		
+		// TODO: fix
+		symbolic::expression::reference ref = make_local_reference( &inout );
+		ref.transform( [ &cache, &fn ] ( symbolic::expression::delegate& exp )
 		{
 			// Skip if not variable.
 			//
-			if ( !exp.is_variable() )
+			if ( !exp->is_variable() )
 				return;
 
 			// Apply transformation.
 			//
-			symbolic::variable& var = exp.uid.get<symbolic::variable>();
+			auto& var = exp->uid.get<symbolic::variable>();
 			if ( auto it = cache.find( var ); it != cache.end() )
 			{
-				if ( it->second ) 
+				if ( it->second && *it->second )
 					exp = it->second;
 			}
 			else
 			{
 				auto res = fn( var );
 				auto [cit, _] = cache.emplace( var, std::move( res ) );
-				
-				if( cit->second )
+
+				if ( cit->second && *cit->second )
 					exp = cit->second;
 			}
 		}, true, false );
+		if ( &*ref != &inout )
+			inout = *ref;
 	}
-
 
     // Propagates all variables in the reference expression onto the new iterator, if no history pointer given will do trace instead of rtrace.
 	// Returns an additional boolean parameter that indicates, if the propagation failed, it was due to a total failure or not; total failure
@@ -204,11 +208,10 @@ namespace vtil
                 //
 				if ( var.reg().flags & register_local )
 				{
-					warning( 
-						"Local variable %s is used before value assignment (Block %x:%x).\n", 
-						var, 
-						var.at.container->owner->entry_point->entry_vip, 
-						var.at.container->entry_vip 
+					warning(
+						"Local variable %s is used before value assignment (Block %x).\n",
+						var,
+						var.at.container->entry_vip
 					);
 				}
 
@@ -384,12 +387,17 @@ namespace vtil
 						//
 						else
 						{
-							result = default_result;
-							result.transform( [ ] ( symbolic::expression& exp )
+							result = std::move( default_result );
+
+							// TODO: fix
+							symbolic::expression::reference ref = make_local_reference( &result );
+							ref.transform( [ ] ( symbolic::expression::delegate& exp )
 							{
-								if ( exp.is_variable() )
-									exp.uid.get<symbolic::variable>().is_branch_dependant = true;
+								if ( exp->is_variable() )
+									( +exp )->uid.get<symbolic::variable>().is_branch_dependant = true;
 							}, true, false );
+							if ( &*ref != &result )
+								result = *ref;
 						}
 						break;
 					}
@@ -500,33 +508,33 @@ namespace vtil
 		// Create a lambda virtual machine and allocate a temporary result.
 		//
 		lambda_vm lvm;
-		symbolic::expression result = {};
+		symbolic::expression::reference result = {};
 
 		lvm.hooks.read_register = [ & ] ( const register_desc& desc )
 		{
 			return trace( { it, desc } );
 		};
-		lvm.hooks.read_memory = [ & ] ( const symbolic::expression& pointer, size_t byte_count )
+		lvm.hooks.read_memory = [ & ] ( const symbolic::expression::reference& pointer, size_t byte_count )
 		{
 			auto exp = trace( symbolic::variable{ it, { pointer, math::narrow_cast<bitcnt_t>( byte_count * 8 ) } } );
 			return exp.is_valid() ? exp.resize( result_bcnt ) : exp;
 		};
-		lvm.hooks.write_register = [ & ] ( const register_desc& desc, symbolic::expression value )
+		lvm.hooks.write_register = [ & ] ( const register_desc& desc, symbolic::expression::reference value )
 		{
 			if ( desc == lookup.reg() )
 				result = std::move( value );
 		};
 
-		lvm.hooks.write_memory = [ & ] ( const symbolic::expression& pointer, symbolic::expression value )
+		lvm.hooks.write_memory = [ & ] ( const symbolic::expression::reference& pointer, symbolic::expression::reference value )
 		{
-			if ( pointer.equals( lookup.mem().decay() ) )
+			if ( pointer->equals( *lookup.mem().decay() ) )
 				result = std::move( value );
 		};
 
 		// Step one instruction, if result was successfuly captured, return.
 		//
 		if ( lvm.execute( *it ), result )
-			return result;
+			return *result;
 
 		// If we could not describe the behaviour, increment iterator and return.
 		//

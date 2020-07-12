@@ -40,7 +40,9 @@ namespace vtil
 
 		// The expression cache.
 		//
-		std::map<symbolic::boxed_expression, operand> translation_cache;
+		std::unordered_map<symbolic::expression::reference, operand, 
+			               symbolic::expression::reference::hasher, 
+			               symbolic::expression::reference::if_identical> translation_cache;
 		
 		// Constructed by binding to a block.
 		//
@@ -48,8 +50,12 @@ namespace vtil
 
 		// operator<< is used to translate expressions.
 		//
-		operand operator<<( const symbolic::expression& exp )
+		operand operator<<( const symbolic::expression::reference& exp )
 		{
+			// If integer, return as is.
+			//
+			if ( exp->is_constant() ) return { *exp->get(), exp->size() };
+			
 			operand& op = translation_cache[ exp ];
 			if ( !op.is_valid() )
 			{
@@ -59,7 +65,6 @@ namespace vtil
 					[ & ] ( auto& exp, auto* block ) { return *this << exp; }
 				);
 			}
-
 			fassert( exp.size() == op.bit_count() );
 			return op;
 		}

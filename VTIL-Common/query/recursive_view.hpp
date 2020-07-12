@@ -271,6 +271,7 @@ namespace vtil::query
 			typename return_type = decltype( std::declval<enumerator_type>()( std::declval<projected_type>() ) ),
 			typename result_type = std::conditional_t<std::is_same_v<return_type, void> || std::is_same_v<return_type, bool>, size_t, std::vector<return_type>>
 		>
+		[[deprecated]]
 		recursive_result<result_type, container_type> for_each( const enumerator_type& enumerator )
 		{
 			// Set local state.
@@ -393,6 +394,7 @@ namespace vtil::query
 		// Otherwise continues appending paths in that structure
 		// until a valid entry is hit.
 		//
+		[[deprecated]]
 		auto first()
 		{
 			auto prev = view.query.controller;
@@ -411,6 +413,52 @@ namespace vtil::query
 				return 1;
 			};
 			return collect();
+		}
+
+		// [Collection method]
+		// Works similar to first but returns on first result regardless of other paths.
+		//
+		[[deprecated]]
+		std::optional<projected_type> first_g()
+		{
+			// Wrap the result in an exception so that we can manually roll-back stack.
+			//
+			struct result_wrapper { projected_type result; };
+
+			auto prev = view.query.controller;
+			auto& proj = view.project_value;
+			view.query.controller = [ prev, &proj ] ( auto& self, iterator_type i ) -> int
+			{
+				// If current iterator reports end or filtered-out,
+				// return as is.
+				//
+				int res = prev( self, i );
+				if ( res <= 0 )
+					return res;
+
+				// Throw the result as an exception.
+				//
+				throw result_wrapper{ .result = proj( self, i ) };
+			};
+
+			// Set local state.
+			//
+			auto* prev_state = impl::local_state;
+
+			// If collect returns, no results, else return as is.
+			//
+			try
+			{
+				collect();
+				return std::nullopt;
+			}
+			catch ( result_wrapper& ex )
+			{
+				// Restore local state and return.
+				//
+				impl::local_state = prev_state;
+				return std::move( ex.result );
+			}
 		}
 	};
 
