@@ -26,7 +26,6 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #include "mov_propagation_pass.hpp"
-#include <vtil/query>
 #include "../common/auxiliaries.hpp"
 
 namespace vtil::optimizer
@@ -41,7 +40,7 @@ namespace vtil::optimizer
 
 		// Override tracer.
 		//
-		symbolic::expression trace( const symbolic::variable& lookup ) override
+		symbolic::expression::reference trace( const symbolic::variable& lookup ) override
 		{
 			// If at bypass point or at the end (due to recursion, invoke original).
 			//
@@ -108,7 +107,7 @@ namespace vtil::optimizer
 
 		// Iterate each instruction:
 		//
-		for ( auto it = blk->begin(); it != blk->end(); it++ )
+		for ( auto it = blk->begin(); !it.is_end(); it++ )
 		{
 			// Skip if volatile.
 			//
@@ -117,7 +116,7 @@ namespace vtil::optimizer
 
 			// Enumerate each operand:
 			//
-			for ( auto [op, type] : it->enum_operands() )
+			for ( auto [op, type] : ( +it )->enum_operands() )
 			{
 				// Skip if being written to or if immediate.
 				//
@@ -138,12 +137,12 @@ namespace vtil::optimizer
 
 				// Skip if invalid result or if we resolved it into an expression.
 				//
-				if ( res.is_expression() || !res.is_valid() )
+				if ( !res || res->is_expression() )
 					continue;
 
 				// If constant:
 				//
-				if ( res.is_constant() )
+				if ( res->is_constant() )
 				{
 					// If operand does not accept immediates, skip.
 					//
@@ -152,7 +151,7 @@ namespace vtil::optimizer
 
 					// Replace the operand with a constant.
 					//
-					operand_swap_buffer.emplace_back( &op, operand{ *res.get(), op.bit_count() } );
+					operand_swap_buffer.emplace_back( &op, operand{ *res->get(), op.bit_count() } );
 				}
 				// If variable:
 				//
@@ -160,7 +159,7 @@ namespace vtil::optimizer
 				{
 					// Skip if not register.
 					//
-					auto& var = res.uid.get<symbolic::variable>();
+					auto& var = res->uid.get<symbolic::variable>();
 					if ( !var.is_register() )
 						continue;
 					auto& reg = var.reg();

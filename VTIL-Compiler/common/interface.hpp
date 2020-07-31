@@ -31,6 +31,7 @@
 #include <chrono>
 #include <algorithm>
 #include <functional>
+#include <atomic>
 #include <thread>
 #include <future>
 
@@ -39,24 +40,36 @@
 //
 #ifndef VTIL_OPT_USE_THREAD_POOLING
 	#define VTIL_OPT_USE_PARALLEL_TRANSFORM true
+#endif
+#ifndef VTIL_OPT_USE_THREAD_POOLING
 	#define VTIL_OPT_USE_THREAD_POOLING     true
 #endif
 
 namespace vtil::optimizer
 {
+	namespace impl
+	{
+		template<typename T>
+		concept AtomicSummable = requires( std::atomic<size_t>& y, T x ) { y += x; };
+	};
+
 	// Passes every block through the transformer given in parallel, returns the 
 	// number of instances where this transformation was applied.
 	//
 	template<typename T, typename... Tx>
-	static size_t transform_parallel( routine* rtn, T&& fn, Tx&&... args )
+	static auto transform_parallel( routine* rtn, T&& fn, Tx&&... args )
 	{
+		using ret_type = decltype( fn( std::declval<basic_block*>(), std::declval<Tx&&>()... ) );
+
 		// Declare worker and allocate the final result.
 		//
 		std::atomic<size_t> n = { 0 };
 		auto worker = [ & ] ( basic_block* blk )
 		{
-			n += fn( blk, args... );
-			symbolic::purge_simplifier_cache();
+			if constexpr ( impl::AtomicSummable<ret_type> ) 
+				n += fn( blk, args... );
+			else
+				fn( blk, args... );
 		};
 
 		// If parallel transformation is disabled, use fallback.
@@ -76,8 +89,6 @@ namespace vtil::optimizer
 			{
 				pool.emplace_back( std::async( std::launch::async, worker, blk ) );
 			} );
-
-			std::for_each( pool.begin(), pool.end(), std::mem_fn( &std::future<void>::wait ) );
 		}
 		// If thread pooling is disabled, use std::thread.
 		//
@@ -96,7 +107,8 @@ namespace vtil::optimizer
 
 		// Return final result.
 		//
-		return n;
+		if constexpr( impl::AtomicSummable<ret_type> )
+			return n.load();
 	}
 
 	// Declares a generic pass interface that any optimization pass implements.
@@ -314,10 +326,10 @@ namespace vtil::optimizer
 	namespace impl
 	{
 		template<template<typename...> typename modifier, typename compound>
-		struct apply_each_opt_t { using type = modifier<compound>; };
+		struct apply_each_opt_t                                       { using type =     modifier<compound>; };
 
 		template<template<typename...> typename modifier, typename compound>
-		struct apply_each_opt_t<modifier, modifier<compound>> { using type = modifier<compound>; };
+		struct apply_each_opt_t<modifier, modifier<compound>>         { using type =     modifier<compound>; };
 
 		template<template<typename...> typename modifier, typename... parts>
 		struct apply_each_opt_t<modifier, spawn_state<parts...>>      { using type =     spawn_state<typename apply_each_opt_t<modifier, parts>::type...>;  };

@@ -27,6 +27,7 @@
 //
 #pragma once
 #include <vtil/symex>
+#include <vtil/common>
 #include <unordered_map>
 #include <shared_mutex>
 #include "tracer.hpp"
@@ -42,7 +43,7 @@ namespace vtil
 	{
         // Define the type of the cache.
         //
-        using cache_type =  std::unordered_map<symbolic::variable, symbolic::expression::reference, hasher<>>;
+        using cache_type =  std::unordered_map<symbolic::variable, symbolic::expression::reference>;
         using cache_entry = cache_type::value_type;
 
         // Declare the lookup map for the cache mapping each variable to the
@@ -52,32 +53,23 @@ namespace vtil
         
         // Locks the cache.
         //
-        mutable std::shared_mutex mtx;
+        mutable relaxed<std::shared_mutex> mtx;
 
         // Hooks default tracer and does a cache lookup before invokation.
         //
-        symbolic::expression trace( const symbolic::variable& lookup ) override;
+        symbolic::expression::reference trace( const symbolic::variable& lookup ) override;
 
         // Default construtor.
         //
         cached_tracer() {}
 
-        // Define copy/move.
+        // Default copy/move.
         //
-        cached_tracer( const cached_tracer& o )
-        {
-            std::shared_lock _g{ o.mtx };
-            cache = o.cache;
-        }
-        cached_tracer& operator=( const cached_tracer& o )
-        {
-            std::unique_lock _gu{ mtx };
-            std::shared_lock _gs{ o.mtx };
-            cache = o.cache;
-        }
-        cached_tracer( cached_tracer&& ) = default;
-        cached_tracer& operator=( cached_tracer&& ) = default;
-
+        cached_tracer( cached_tracer&& o ) = default;
+        cached_tracer( const cached_tracer& o ) = default;
+        cached_tracer& operator=( cached_tracer&& o ) = default;
+        cached_tracer& operator=( const cached_tracer& o ) = default;
+        
         // Flushes the cache.
         //
         void flush() { cache.clear(); }
@@ -85,7 +77,7 @@ namespace vtil
         {
             for ( auto it = cache.begin(); it != cache.end(); )
             {
-                if ( it->first.at.container == blk )
+                if ( it->first.at.block == blk )
                     it = cache.erase( it );
                 else
                     it++;

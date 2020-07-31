@@ -31,9 +31,9 @@
 #include <cstdio>
 #include <type_traits>
 #include <chrono>
-#include "../util/concept.hpp"
+#include <optional>
 #include "../util/lt_typeid.hpp"
-#include "../util/dynamic_size.hpp"
+#include "../util/type_helpers.hpp"
 
 // [Configuration]
 // Determine the way we format the instructions.
@@ -50,60 +50,18 @@
 	#define VTIL_FMT_DEFINED
 #endif
 
-// Determine RTTI support.
-//
-#if defined(_CPPRTTI)
-	#define HAS_RTTI	_CPPRTTI
-#elif defined(__GXX_RTTI)
-	#define HAS_RTTI	__GXX_RTTI
-#elif defined(__has_feature)
-	#define HAS_RTTI	__has_feature(cxx_rtti)
-#else
-	#define HAS_RTTI	0
-#endif
-
-
 namespace vtil::format
 {
-	// Suffixes used to indicate registers of N bytes.
-	//
-	static constexpr char suffix_map[] = { 0, VTIL_FMT_SUFFIX_1, VTIL_FMT_SUFFIX_2, 0, VTIL_FMT_SUFFIX_4, 0, 0, 0, VTIL_FMT_SUFFIX_8 };
-
 	namespace impl
 	{
-		// Check if type is convertable to string using std::to_string.
-		//
-		template<typename... D>
-		struct std_to_string : concept_base<std_to_string, D...>
-		{
-			template<typename T>
-			static auto f( T v ) -> decltype( std::to_string( v ) );
-		};
-
-		// Check if type is convertable to string using T.to_string().
-		//
-		template<typename... D>
-		struct has_to_string : concept_base<has_to_string, D...>
-		{
-			template<typename T>
-			static auto f( T v ) -> decltype( v.to_string() );
-		};
-
-		// Check if type is a chrono duration.
-		//
-		template <typename types>
-		static constexpr bool is_duration_v = false;
-		template <typename... types>
-		static constexpr bool is_duration_v<std::chrono::duration<types...>> = true;
-
 		// Returns a temporary but valid const (w)char* for the given std::(w)string.
 		//
 		template<typename T>
 		static T* buffer_string( std::basic_string<T>&& value )
 		{
-			static thread_local std::basic_string<T> ring_buffer[ 16 ];
-			static thread_local int index = 0;
-
+			static thread_local size_t index = 0;
+			static thread_local std::basic_string<T> ring_buffer[ 32 ];
+			
 			auto& ref = ring_buffer[ index ];
 			ref = std::move( value );
 			index = ++index % std::size( ring_buffer );
@@ -112,7 +70,7 @@ namespace vtil::format
 
 		// Fixes the type name to be more friendly.
 		//
-		static std::string fix_type_name( std::string&& in )
+		static std::string fix_type_name( std::string in )
 		{
 			static constexpr const char* remove_list[] = {
 				"struct ",
@@ -124,20 +82,18 @@ namespace vtil::format
 			{
 				if ( in.starts_with( str ) )
 					return fix_type_name( in.substr( strlen( str ) ) );
+
 				for ( size_t i = 0; i < in.size(); i++ )
-				{
 					if ( in[ i ] == '<' && in.substr( i + 1 ).starts_with( str ) )
 						in = in.substr( 0, i + 1 ) + in.substr( i + 1 + strlen( str ) );
-				}
 			}
 			return in;
 		}
 	};
 
-	// Simple boolean to check if object supports string conversion.
+	// Suffixes used to indicate registers of N bytes.
 	//
-	template<typename T>
-	static constexpr bool has_string_conversion_v = impl::std_to_string<T>::apply() || impl::has_to_string<T>::apply();
+	static constexpr char suffix_map[] = { 0, VTIL_FMT_SUFFIX_1, VTIL_FMT_SUFFIX_2, 0, VTIL_FMT_SUFFIX_4, 0, 0, 0, VTIL_FMT_SUFFIX_8 };
 
 	// Returns the type name of the object passed, dynamic type name will
 	// redirect to static type name if RTTI is not supported.
@@ -164,35 +120,50 @@ namespace vtil::format
 #endif
 	}
 
+	// VTIL string-convertable types implement [std::string T::to_string() const];
+	//
+	template<typename T>
+	concept CustomStringConvertible = requires( T v ) { v.to_string(); };
+
+	// Checks if std::to_string is specialized to convert type into string.
+	//
+	template<typename T>
+	concept StdStringConvertible = requires( T v ) { std::to_string( v ); };
+
 	// Converts any given object to a string.
 	//
 	template<typename T>
-	static std::string as_string( T&& x )
+	static auto as_string( const T& x );
+	template<typename T>
+	concept StringConvertible = requires( T v ) { !is_specialization_v<type_tag, decltype( as_string( v ) )>; };
+
+	template<typename T>
+	static auto as_string( const T& x )
 	{
 		using base_type = std::decay_t<T>;
-
-		if constexpr ( impl::std_to_string<T>::apply() )
-		{
-			return std::to_string( x );
-		}
-		else if constexpr ( impl::has_to_string<T>::apply() )
+		
+		if constexpr ( CustomStringConvertible<T> )
 		{
 			return x.to_string();
+		}
+		else if constexpr ( StdStringConvertible<T> )
+		{
+			return std::to_string( x );
 		}
 		else if constexpr ( std::is_same_v<base_type, std::string> || 
 							std::is_same_v<base_type, const char*> )
 		{
-			return x;
+			return std::string{ x };
 		}
 		else if constexpr ( std::is_same_v<base_type, std::wstring> )
 		{
-			return std::string( x.begin(), x.end() );
+			return std::string{ x.begin(), x.end() };
 		}
 		else if constexpr ( std::is_same_v<base_type, const wchar_t*> )
 		{
-			return as_string( std::wstring{ x } );
+			return std::string{ x, x + wcslen( x ) };
 		}
-		else if constexpr ( impl::is_duration_v<base_type> )
+		else if constexpr ( is_specialization_v<std::chrono::duration, base_type> )
 		{
 			static constexpr auto flt2str = [ ] ( float f ) -> std::string
 			{
@@ -213,24 +184,50 @@ namespace vtil::format
 			for ( auto& [dur, name, last] : durations )
 				if ( last || x > dur )
 					return flt2str( x.count() / float( dur.count() ) ) + name;
-
-			// Should not be reached, but unreachable() relies on formatting so abort instead.
-			//
-			abort();
+			unreachable();
 		}
-		else
+		else if constexpr ( std::is_pointer_v<base_type> )
 		{
-			char buffer[ 32 ];
-			snprintf( buffer, 32, "%p", &x );
-			return "[" + dynamic_type_name( x ) + "@" + std::string( buffer ) + "]";
+			char buffer[ 17 ];
+			snprintf( buffer, 17, "%p", x );
+			return std::string{ buffer };
 		}
+		else if constexpr ( is_specialization_v<std::pair, base_type> )
+		{
+			if constexpr ( StringConvertible<decltype( x.first )> && StringConvertible<decltype( x.second )> )
+			{
+				return "{" + as_string( x.first ) + ", " + as_string( x.second ) + "}";
+			}
+			else return type_tag<T>{};
+		}
+		else if constexpr ( is_specialization_v<std::optional, base_type> )
+		{
+			if constexpr ( StringConvertible<decltype( x.value() )> )
+			{
+				if ( x.has_value() )
+					return as_string( x.value() );
+				else
+					return std::string{ "nullopt" };
+			}
+			else return type_tag<T>{};
+		}
+		else if constexpr ( Iterable<T> )
+		{
+			if constexpr ( StringConvertible<decltype( *std::begin( x ) )> )
+			{
+				std::string items = {};
+				for ( auto& entry : x )
+					items += as_string( entry ) + ", ";
+				if ( !items.empty() ) items.resize( items.size() - 2 );
+				return "{" + items + "}";
+			}
+			else return type_tag<T>{};
+		}
+		else return type_tag<T>{};
 	}
 
 	// Used to fix std::(w)string usage in combination with "%(l)s".
 	//
-	#ifdef __INTEL_COMPILER
-		#pragma warning (supress:1011) // Billion dollar company yes? #2
-	#endif
 	template<typename T>
 	inline static auto fix_parameter( T&& x )
 	{
@@ -241,7 +238,7 @@ namespace vtil::format
 		if constexpr ( std::is_fundamental_v<base_type> || std::is_enum_v<base_type> || 
 					   std::is_pointer_v<base_type> || std::is_array_v<base_type> )
 		{
-			return std::forward<T>( x );
+			return x;
 		}
 		// If it is a basic string:
 		//
@@ -256,24 +253,19 @@ namespace vtil::format
 			else
 				return impl::buffer_string( std::move( x ) );
 		}
-		// If container:
+		// If string convertible:
 		//
-		else if constexpr ( is_random_access_v<T> && !impl::has_to_string<T>::apply() )
+		else if constexpr ( StringConvertible<T> )
 		{
-			size_t n = dynamic_size( x );
-			std::string result = "{";
-			for ( size_t i = 0; i < n; i++ )
-			{
-				result += as_string( deref_n( x, i ) );
-				if ( ( i + 1 ) != n ) result += ", ";
-			}
-			return impl::buffer_string( result + "}" );
+			return impl::buffer_string( as_string( std::forward<T>( x ) ) );
 		}
 		// If none matched, forcefully convert into [type @ pointer].
 		//
 		else
 		{
-			return impl::buffer_string( as_string( x ) );
+			char buffer[ 32 ];
+			snprintf( buffer, 32, "%p", &x );
+			return impl::buffer_string( "[" + dynamic_type_name( x ) + "@" + std::string( buffer ) + "]" );
 		}
 	}
 
@@ -313,3 +305,12 @@ namespace vtil::format
 	}
 };
 #undef HAS_RTTI
+
+// Export the concepts.
+//
+namespace vtil
+{
+	using format::CustomStringConvertible;
+	using format::StdStringConvertible;
+	using format::StringConvertible;
+};

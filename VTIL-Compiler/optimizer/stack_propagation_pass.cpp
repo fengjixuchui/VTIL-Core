@@ -26,7 +26,6 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #include "stack_propagation_pass.hpp"
-#include <vtil/query>
 #include "../common/auxiliaries.hpp"
 
 namespace vtil::optimizer
@@ -35,52 +34,38 @@ namespace vtil::optimizer
 	//
 	struct lazy_tracer : cached_tracer
 	{
-		bool bypass = false;
+		cached_tracer* link;
+		il_const_iterator bypass = {};
 
-		symbolic::expression trace( const symbolic::variable& lookup ) override
+		lazy_tracer( cached_tracer* p ) : link( p ) {}
+
+		tracer* purify() override { return link; }
+
+		symbolic::expression::reference trace( const symbolic::variable& lookup ) override
 		{
-			if( bypass || lookup.at.is_end() )
+			// If tracing stack pointer, use normal tracing.
+			//
+			if( lookup.is_register() && lookup.reg().is_stack_pointer() )
+				return link->trace( lookup );
+
+			// If instruction accesses memory:
+			//
+			if ( !lookup.at.is_end() && lookup.at->base->accesses_memory() )
+			{
+				// If query overlaps base, trace normally.
+				//
+				if ( lookup.is_register() && lookup.reg().overlaps( lookup.at->memory_location().first ) )
+					return link->trace( lookup );
+			}
+
+			// Bypass if at the beginning of block//query.
+			//
+			if ( !bypass.is_valid() || lookup.at == bypass || lookup.at.is_end() )
 				return cached_tracer::trace( lookup );
 
-			// If iterator is at a str instruction and we're 
-			// looking up the stored operand, return without tracing.
+			// Return without tracing.
 			//
-			if ( !lookup.at.is_end() && lookup.at->base == &ins::str &&
-				 lookup.is_register() && lookup.at->operands[ 2 ].is_register() &&
-				 lookup.reg() == lookup.at->operands[ 2 ].reg() &&
-				 !lookup.reg().is_stack_pointer() )
-			{
-				return lookup.to_expression();
-			}
-
-			// Fallback to default tracer.
-			//
-			bypass = true;
-			auto result = cached_tracer::trace( lookup );
-			bypass = false;
-			return result;
-		}
-
-		symbolic::expression rtrace( const symbolic::variable& lookup, int64_t limit = -1 ) override
-		{
-			// Invoke default tracer and store the result.
-			//
-			bool recursive_flag_prev = recursive_flag;
-			recursive_flag = true;
-			symbolic::expression result = cached_tracer::trace( lookup );
-			recursive_flag = recursive_flag_prev;
-			
-			// If result is a variable:
-			//
-			if ( result.is_variable() )
-			{
-				// If result is a non-local memory variable, invoke rtrace primitive.
-				//
-				auto& var = result.uid.get<symbolic::variable>();
-				if ( var.is_memory() && !aux::is_local( *var.mem().decay() ) )
-					return cached_tracer::rtrace( var, limit );
-			}
-			return result;
+			return lookup.to_expression();
 		}
 	};
 
@@ -94,29 +79,25 @@ namespace vtil::optimizer
 
 		// Create tracers.
 		//
-		lazy_tracer ltracer = {};
 		cached_tracer ctracer = {};
+		lazy_tracer ltracer = { &ctracer };
 
 		// Allocate the swap buffers.
 		//
 		std::vector<std::tuple<il_iterator, const instruction_desc*, operand>> ins_swap_buffer;
 		std::vector<std::tuple<il_iterator, const instruction_desc*, symbolic::variable>> ins_revive_swap_buffer;
 
-		// => Begin a foward iterating query.
+		// For each instruction:
 		//
-		query::create( blk->begin(), +1 )
+		for ( auto it = blk->begin(); !it.is_end(); it++ )
+		{
+			// Skip volatile instructions.
+			//
+			if ( it->is_volatile() ) continue;
 
-			// >> Skip volatile instructions.
-			.where( [ ] ( instruction& ins ) { return !ins.is_volatile(); } )
-		
-			// | Filter to LDD instructions referencing stack:
-			.where( [ ] ( instruction& ins ) { return ins.base == &ins::ldd && ins.memory_location().first.is_stack_pointer(); } )
-
-			// := Project back to iterator type.
-			.unproject()
-		
-			// @ For each:
-			.for_each( [ & ] ( const il_iterator& it )
+			// Filter to LDD instructions referencing stack:
+			//
+			if ( it->base == &ins::ldd && it->memory_location().first.is_stack_pointer() )
 			{
 				auto resize_and_pack = [ & ] ( symbolic::expression::reference& exp )
 				{
@@ -125,11 +106,11 @@ namespace vtil::optimizer
 
 				// Lazy-trace the value.
 				//
-				symbolic::pointer ptr = { ltracer.cached_tracer::trace_p( { it, REG_SP } ) + it->memory_location().second };
-				symbolic::variable var = { it, { ptr, it->access_size() } };
-				var.at.paths_allowed = &it.container->owner->get_path( it.container->owner->entry_point, it.container );
-				var.at.is_path_restricted = true;
-				symbolic::expression::reference exp = xblock ? ltracer.rtrace( var ) : ltracer.cached_tracer::trace( var );
+				symbolic::pointer ptr = { ctracer.trace( { it, REG_SP } ) + it->memory_location().second };
+				symbolic::variable var = { it, { std::move( ptr ), it->access_size() } };
+				ltracer.bypass = it;
+				auto exp = xblock ? ltracer.rtrace( var ) : ltracer.trace( var );
+				ltracer.bypass = {};
 
 				// Resize and pack variables.
 				//
@@ -157,7 +138,7 @@ namespace vtil::optimizer
 					//
 					else
 					{
-						return;
+						continue;
 					}
 				}
 
@@ -174,16 +155,16 @@ namespace vtil::optimizer
 				else
 				{
 					fassert( exp->is_variable() );
-				
+
 					// Skip if not a register or branch dependant.
 					//
 					symbolic::variable rvar = exp->uid.get<symbolic::variable>();
 					if ( rvar.is_branch_dependant || !rvar.is_register() )
-						return;
+						continue;
 
 					// If value is not alive, try hijacking the value declaration.
 					//
-					if ( !aux::is_alive( rvar, it, xblock, &ctracer ) )
+					if ( !aux::is_alive( rvar, it, xblock, nullptr ) )
 					{
 						// Must be a valid (and non-end) iterator.
 						//
@@ -192,12 +173,12 @@ namespace vtil::optimizer
 							// If begin (begin&&end == invalid), fail.
 							//
 							if ( rvar.at.is_begin() )
-								return;
+								continue;
 
 							// Try determining the path to current block.
 							//
 							il_const_iterator it_rstr = rvar.at;
-							it_rstr.restrict_path( it.container, true );
+							it_rstr.restrict_path( it.block, true );
 							std::vector<il_const_iterator> next = it_rstr.recurse( true );
 
 							// If single direction possible, replace iterator, otherwise fail.
@@ -205,7 +186,7 @@ namespace vtil::optimizer
 							if ( next.size() == 1 )
 								rvar.bind( next[ 0 ] );
 							else
-								return;
+								continue;
 						}
 
 						// Push to swap buffer.
@@ -219,8 +200,8 @@ namespace vtil::optimizer
 						ins_swap_buffer.emplace_back( it, new_instruction, operand{ rvar.reg() } );
 					}
 				}
-			});
-
+			}
+		}
 
 		// Acquire lock and swap all instructions at once.
 		//
@@ -229,17 +210,21 @@ namespace vtil::optimizer
 
 		for ( auto [it, ins, op] : ins_swap_buffer )
 		{
-			it->base = ins;
-			it->operands = { it->operands[ 0 ], op };
+			( +it )->base = ins;
+			( +it )->operands = { it->operands[ 0 ], op };
 			it->is_valid( true );
 		}
 		for ( auto [it, ins, var] : ins_revive_swap_buffer )
 		{
-			it->base = ins;
+			( +it )->base = ins;
 
-			auto& rev = revive_list[ var ];
-			if ( !rev.is_valid() ) rev = aux::revive_register( var, it );
-			it->operands = { it->operands[ 0 ], rev };
+			register_desc rev;
+			if ( auto i2 = xblock ? revive_list.find( var ) : revive_list.end(); i2 != revive_list.end() )
+				rev = i2->second;
+			else
+				rev = aux::revive_register( var, it );
+
+			( +it )->operands = { it->operands[ 0 ], rev };
 			it->is_valid( true );
 		}
 		return ins_swap_buffer.size() + ins_revive_swap_buffer.size();

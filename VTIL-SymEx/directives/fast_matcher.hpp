@@ -34,13 +34,13 @@ namespace vtil::symbolic::directive
 { 
 	// Internal representation of the Variable -> Expression mapping. 
 	// 
-	struct symbol_table_t 
+	struct symbol_table_t
 	{ 
-		expression::reference lookup_table[ number_of_lookup_indices ]; 
+		expression::weak_reference lookup_table[ number_of_lookup_indices ];
  
 		// Adds the mapping of a variable to an expression. 
 		// 
-		bool add( const instance* dir, const expression::reference& exp ) 
+		bool add( const instance* dir, expression::weak_reference exp ) 
 		{ 
 			// If it's the first time this variable is being used: 
 			// 
@@ -74,7 +74,7 @@ namespace vtil::symbolic::directive
  
 		// Translates a variable to the matching expression. 
 		// 
-		expression::reference translate( const instance* dir ) const 
+		const expression::reference& translate( const instance* dir ) const 
 		{ 
 			// Assert the looked up type is variable. 
 			// 
@@ -82,9 +82,9 @@ namespace vtil::symbolic::directive
  
 			// Translate using the lookup table. 
 			// 
-			return lookup_table[ dir->lookup_index ]; 
+			return ( const expression::reference& ) lookup_table[ dir->lookup_index ].make_shared();
 		}
-		expression::reference translate( const instance& dir ) const { return translate( &dir ); }
+		const expression::reference& translate( const instance& dir ) const { return translate( &dir ); }
 	}; 
  
 	// Tries to match the the given expression with the directive and fills the  
@@ -93,7 +93,7 @@ namespace vtil::symbolic::directive
 	template<typename T, std::enable_if_t<std::is_same_v<typename T::value_type, symbol_table_t>, int> = 0> 
 	static size_t fast_match( T* results, 
 							  const instance* dir, 
-							  const expression::reference& exp, 
+							  expression::weak_reference exp, 
 							  size_t index = 0 ) 
 	{ 
 		// Initialize the result list if not done already. 
@@ -134,13 +134,13 @@ namespace vtil::symbolic::directive
 		{ 
 			// Resolve operator descriptor, if unary, redirect to the matching of RHS. 
 			// 
-			const math::operator_desc* desc = exp->get_op_desc(); 
-			if ( desc->operand_count == 1 ) 
+			const math::operator_desc& desc = exp->get_op_desc(); 
+			if ( desc.operand_count == 1 ) 
 				return fast_match( results, dir->rhs, exp->rhs, index ); 
  
 			// If operator is commutative: 
 			// 
-			if ( desc->is_commutative ) 
+			if ( desc.is_commutative ) 
 			{ 
 				// Save the current table on stack. 
 				// 
@@ -158,7 +158,7 @@ namespace vtil::symbolic::directive
  
 				// Push the saved table into the results and update the iterator. 
 				// 
-				results->push_back( std::move( tmp ) ); 
+				results->emplace_back( std::move( tmp ) ); 
 				index = results->size() - 1; 
  
 				// Try matching the directive's LHS with expression's RHS. 
@@ -198,5 +198,5 @@ namespace vtil::symbolic::directive
 		return ( results->size() + 1 ) - size_0; 
 	} 
 	template<typename T, std::enable_if_t<std::is_same_v<typename T::value_type, symbol_table_t>, int> = 0>
-	static size_t fast_match( T* results, const instance& dir, const expression::reference& exp, size_t index = 0 ) { return fast_match( results, &dir, exp, index ); }
+	static size_t fast_match( T* results, const instance& dir, expression::weak_reference exp, size_t index = 0 ) { return fast_match( results, &dir, exp, index ); }
 };

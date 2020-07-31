@@ -26,16 +26,60 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <type_traits>
+#include <vtil/math>
+#include <vtil/utility>
+#include <vtil/io>
+#include <array>
 
-namespace vtil
+namespace vtil::symbolic
 {
-	// A simple helper that creates a constant reference to the default constructed value of the type.
+	// This class allows O(1) approximation of tree-matching by storing a 
+	// compressed signature.
 	//
-	template<typename T, auto... params>
-	inline static const T& make_default()
+	struct expression_signature : reducable<expression_signature>
 	{
-		static const T v = { params... };
-		return v;
-	}
+		// Signature itself.
+		//
+		std::array<uint64_t, 3> signature;
+
+		// Signature hash.
+		//
+		hash_t hash_value;
+		
+		// Declare constructors.
+		//
+		expression_signature() {}
+		expression_signature( const math::bit_vector& value );
+		expression_signature( math::operator_id op, const expression_signature& rhs );
+		expression_signature( const expression_signature& lhs, math::operator_id op, const expression_signature& rhs );
+
+		// Default copy/move.
+		//
+		expression_signature( expression_signature&& ) = default;
+		expression_signature( const expression_signature& ) = default;
+		expression_signature& operator=( expression_signature&& ) = default;
+		expression_signature& operator=( const expression_signature& ) = default;
+		
+		// Shinks to a single 64-bit integer.
+		//
+		uint64_t shrink() const;
+		
+		// Checks if RHS can match into LHS.
+		//
+		bool can_match( const expression_signature& o ) const
+		{
+			for ( auto [a, b] : zip( signature, o.signature ) )
+				if ( ( a & b ) != b )
+					return false;
+			return true;
+		}
+
+		// Custom hasher.
+		//
+		hash_t hash() const { return hash_value; }
+		
+		// Declare reduction.
+		//
+		REDUCE_TO( signature );
+	};
 };

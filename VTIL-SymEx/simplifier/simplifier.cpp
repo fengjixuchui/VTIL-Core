@@ -31,7 +31,21 @@
 #include "../expressions/expression.hpp"
 #include "../directives/transformer.hpp"
 #include <vtil/io>
+#include <vtil/utility>
 
+// [Configuration]
+// Determine the depth limit after which we start self generated signature matching and
+// the properties of the LRU cache.
+//
+#ifndef VTIL_SYMEX_SELFGEN_SIGMATCH_DEPTH_LIM
+	#define	VTIL_SYMEX_SELFGEN_SIGMATCH_DEPTH_LIM   3
+#endif
+#ifndef VTIL_SYMEX_LRU_CACHE_SIZE
+	#define VTIL_SYMEX_LRU_CACHE_SIZE               0x40000
+#endif
+#ifndef VTIL_SYMEX_LRU_PRUNE_COEFF
+	#define VTIL_SYMEX_LRU_PRUNE_COEFF              0.5
+#endif
 namespace vtil::symbolic
 {
 	struct join_depth_exception : std::exception
@@ -47,45 +61,299 @@ namespace vtil::symbolic
 	using static_directive_table_entry =  std::pair<directive::instance,        directive::instance>;
 	using dynamic_directive_table_entry = std::pair<const directive::instance*, const directive::instance*>;
 
-	using dynamic_directive_table =      std::vector<dynamic_directive_table_entry>;
-	using organized_directive_table =    std::array<dynamic_directive_table, ( size_t ) math::operator_id::max>;
+	using dynamic_directive_table =       std::vector<dynamic_directive_table_entry>;
+	using organized_directive_table =     std::array<dynamic_directive_table, ( size_t ) math::operator_id::max>;
 
 	template<typename T>
 	static organized_directive_table build_dynamic_table( const T& container )
 	{
 		organized_directive_table table;
-		for ( auto [table, op] : zip( table, iindices() ) )
+		for ( auto [table, op] : zip( table, iindices ) )
 			for( auto& directive : container )
 				if ( directive.first.op == ( math::operator_id ) op )
 					table.emplace_back( &directive.first, &directive.second );
 		return table;
 	};
 
-	static auto& get_boolean_joiners( math::operator_id op ) { static auto tbl = build_dynamic_table( directive::boolean_joiners ); return tbl[ ( size_t ) op ]; }
-	static auto& get_pack_descriptors( math::operator_id op ) { static auto tbl = build_dynamic_table( directive::pack_descriptors ); return tbl[ ( size_t ) op ]; }
-	static auto& get_join_descriptors( math::operator_id op ) { static auto tbl = build_dynamic_table( directive::join_descriptors ); return tbl[ ( size_t ) op ]; }
-	static auto& get_unpack_descriptors( math::operator_id op ) { static auto tbl = build_dynamic_table( directive::unpack_descriptors ); return tbl[ ( size_t ) op ]; }
-	static auto& get_boolean_simplifiers( math::operator_id op ) { static auto boolean_simplifiers = directive::build_boolean_simplifiers(); static auto tbl = build_dynamic_table( boolean_simplifiers ); return tbl[ ( size_t ) op ]; }
-	static auto& get_universal_simplifiers( math::operator_id op ) { static auto tbl = build_dynamic_table( directive::universal_simplifiers ); return tbl[ ( size_t ) op ]; }
+	static auto& get_boolean_joiners( math::operator_id op )       { static const auto tbl = build_dynamic_table( directive::boolean_joiners );             return tbl[ ( size_t ) op ]; }
+	static auto& get_pack_descriptors( math::operator_id op )      { static const auto tbl = build_dynamic_table( directive::pack_descriptors );            return tbl[ ( size_t ) op ]; }
+	static auto& get_join_descriptors( math::operator_id op )      { static const auto tbl = build_dynamic_table( directive::join_descriptors );            return tbl[ ( size_t ) op ]; }
+	static auto& get_unpack_descriptors( math::operator_id op )    { static const auto tbl = build_dynamic_table( directive::unpack_descriptors );          return tbl[ ( size_t ) op ]; }
+	static auto& get_boolean_simplifiers( math::operator_id op )   { static const auto tbl = build_dynamic_table( directive::build_boolean_simplifiers() ); return tbl[ ( size_t ) op ]; }
+	static auto& get_universal_simplifiers( math::operator_id op ) { static const auto tbl = build_dynamic_table( directive::universal_simplifiers );       return tbl[ ( size_t ) op ]; }
 
 	// Simplifier cache and its accessors.
 	//
-	using simplifier_cache_t = std::unordered_map<expression::reference, std::pair<expression::reference, bool>, 
-		                                          expression::reference::hasher, 
-		                                          expression::reference::if_identical                          >;
-	static thread_local simplifier_cache_t simplifier_cache;
-
-	void purge_simplifier_cache()
+	struct local_simplification_cache
 	{
-		simplifier_cache.clear();
-	}
+		static constexpr size_t max_cache_entries = VTIL_SYMEX_LRU_CACHE_SIZE;
+		static constexpr size_t cache_prune_count = ( size_t ) ( max_cache_entries * VTIL_SYMEX_LRU_PRUNE_COEFF );
 
-	static std::tuple<expression::reference&, bool&, bool> lookup_simplifier_cache( const expression::reference& exp )
-	{
-		static const std::pair default_value = { expression::reference{}, false };
-		auto [it, inserted] = simplifier_cache.emplace( exp, default_value );
-		return { it->second.first, it->second.second, !inserted };
-	}
+		// Declare custom hash / equivalence checks hijacking the hash map iteration.
+		//
+		struct cache_value;
+		struct signature_hasher
+		{
+			size_t operator()( const expression::reference& ref ) const noexcept { return ref->signature.hash(); }
+		};
+		struct cache_scanner
+		{
+			struct sigscan_result
+			{
+				const expression::reference& key;
+				cache_value* match = nullptr;
+				expression::uid_relation_table table;
+			};
+			inline static thread_local sigscan_result* sigscan = nullptr;
+
+			bool operator()( const expression::reference& a, const expression::reference& b ) const noexcept 
+			{ 
+				// If identical expressions, return true.
+				//
+				if ( a.is_identical( *b ) )
+					return true;
+
+				// If there's a pending signature matching request:
+				//
+				if ( sigscan )
+				{
+					// Find out which argument is "this", if failed return false.
+					//
+					auto self = &a, other = &b;
+					if ( a.pointer != sigscan->key.pointer )
+						std::swap( self, other );
+
+					// If other's past depth limit:
+					//
+					if ( ( *other )->depth > VTIL_SYMEX_SELFGEN_SIGMATCH_DEPTH_LIM )
+					{
+						// If matching signature, save the match, steal full value from the reference to the key.
+						//
+						if ( auto vec = ( *other )->match_to( **self ) )
+						{
+							sigscan->table = std::move( *vec );
+							using kv_pair = std::pair<const expression::reference, cache_value>;
+							sigscan->match = &( ( kv_pair* ) other )->second;
+							
+							// Clear the request.
+							//
+							sigscan = nullptr;
+						}
+					}
+				}
+				return false;
+			}
+		};
+
+		// Cache entry and map type.
+		//
+		using cache_map = std::unordered_map<expression::reference, cache_value, signature_hasher, cache_scanner>;
+		struct cache_value
+		{
+			using queue_key = typename detached_queue<cache_value>::key;
+
+			// Entry itself:
+			//
+			expression::reference result = {};
+			bool is_simplified = false;
+
+			// Implementation details:
+			//
+			int32_t lock_count = 0;
+			queue_key lru_key = {};
+			queue_key spec_key = {};
+			cache_map::const_iterator iterator = {};
+		};
+
+		// References a cache value until its destruction.
+		//
+		struct scope_reference
+		{
+			int32_t& lock_count;
+
+			scope_reference( cache_value* value ) : lock_count( ++value->lock_count ) {}
+			scope_reference( scope_reference&& o ) = delete;
+			scope_reference( const scope_reference& a ) = delete;
+			~scope_reference() { lock_count--; }
+		};
+
+		// Whether we're executing speculatively or not.
+		//
+		bool is_speculative = false;
+
+		// Queue for LRU age tracking and the speculativeness.
+		//
+		detached_queue<cache_value> lru_queue;
+		detached_queue<cache_value> spec_queue;
+
+		// Cache map.
+		//
+		cache_map map{ max_cache_entries };
+
+		// Resets the local cache.
+		//
+		void reset()
+		{
+			lru_queue.reset();
+			spec_queue.reset();
+			is_speculative = false;
+			map.clear();
+			map.reserve( max_cache_entries );
+		}
+
+		// Begins speculative execution.
+		//
+		void begin_speculative()
+		{
+			is_speculative = true;
+		}
+
+		// Ends speculative execution and marks all speculative entries valid.
+		//
+		void join_speculative()
+		{
+			for ( auto it = spec_queue.head; it; )
+			{
+				auto next = it->next;
+				spec_queue.erase( it );
+				it = next;
+			}
+			is_speculative = false;
+		}
+
+		// Ends speculative execution and trashes all incomplete speculative entries.
+		//
+		void trash_speculative()
+		{
+			spec_queue.pop_front( &cache_value::spec_key );
+
+			for ( auto it = spec_queue.head; it; )
+			{
+				auto next = it->next;
+				cache_value* value = it->get( &cache_value::spec_key );
+				dassert( value->lock_count <= 0 );
+				if ( value->is_simplified )
+					spec_queue.erase( it );
+				else
+					erase( value );
+				it = next;
+			}
+			is_speculative = false;
+		}
+
+		// Erases a cache entry.
+		//
+		void erase( cache_value* value )
+		{
+			lru_queue.erase( &value->lru_key );
+			spec_queue.erase_if( &value->spec_key );
+			map.erase( std::move( value->iterator ) );
+		}
+
+		// Initializes a new entry in the map.
+		//
+		void init_entry( const cache_map::iterator& entry_it )
+		{
+			// Save the iterator.
+			//
+			entry_it->second.iterator = entry_it;
+
+			// If simplifying speculatively, link to tail.
+			//
+			if ( is_speculative )
+				spec_queue.emplace_back( &entry_it->second.spec_key );
+
+			// If we reached max entries, prune:
+			//
+			if ( lru_queue.size() == max_cache_entries )
+			{
+				for ( auto it = lru_queue.head; it && ( lru_queue.size() + cache_prune_count ) > max_cache_entries; )
+				{
+					auto next = it->next;
+
+					// Erase if not locked:
+					//
+					cache_value* value = it->get( &cache_value::lru_key );
+					if ( value->lock_count <= 0 )
+						erase( value );
+
+					it = next;
+				}
+			}
+		}
+
+		// Looks up the cache for the expression, returns [<result>, <simplified?>, <exists?>, <LRU lock>].
+		//
+		std::tuple<expression::reference&, bool&, bool, scope_reference> lookup( const expression::reference& exp )
+		{
+			// Signal signature matcher.
+			//
+			cache_scanner::sigscan_result sig_search = { exp };
+			cache_scanner::sigscan = exp->depth > VTIL_SYMEX_SELFGEN_SIGMATCH_DEPTH_LIM ? &sig_search : nullptr;
+			auto [it, inserted] = map.emplace( exp, make_default<cache_value>() );
+			cache_scanner::sigscan = nullptr;
+
+			// If we inserted a new entry:
+			//
+			if ( inserted )
+			{
+				// If there is a partial match:
+				//
+				if ( auto base = sig_search.match )
+				{
+					// Reset inserted flag.
+					//
+					inserted = false;
+
+					// If simplified, transform according to the UID table.
+					//
+					if ( base->is_simplified )
+					{
+						it->second.result = make_const( base->result ).transform( [ &sig_search ] ( expression::delegate& exp )
+						{
+							if ( !exp->is_variable() )
+								return;
+							for ( auto& [a, b] : sig_search.table )
+							{
+								if ( exp->is_identical( *a ) )
+								{
+									exp = b.make_shared();
+									break;
+								}
+							}
+						}, true, false );
+						it->second.result->simplify_hint = true;
+						it->second.is_simplified = true;
+					}
+					// Otherwise, declare failure.
+					//
+					else
+					{
+						it->second.is_simplified = false;
+					}
+
+					// Erase the previous entry.
+					//
+					erase( base );
+				}
+
+				// Initialize it.
+				//
+				init_entry( it );
+			}
+			else
+			{
+				lru_queue.erase( &it->second.lru_key );
+			}
+
+			// Insert into the tail of use list.
+			//
+			lru_queue.emplace_back( &it->second.lru_key );
+			return { it->second.result, it->second.is_simplified, !inserted, &it->second };
+		}
+	};
+	static thread_local local_simplification_cache local_cache;
+	void purge_simplifier_cache() { local_cache.reset(); }
 
 	// Attempts to prettify the expression given.
 	//
@@ -124,7 +392,7 @@ namespace vtil::symbolic
 		{
 			// If we can transform the expression by the directive set:
 			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst, {}, -1 ) )
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, -1 ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_PRP>( "[Pack] %s => %s\n", *dir_src, *dir_dst );
@@ -228,12 +496,17 @@ namespace vtil::symbolic
 	// Attempts to simplify the expression given, returns whether the simplification
 	// succeeded or not.
 	//
-	bool simplify_expression( expression::reference& exp, bool pretty, int64_t max_depth, bool unpack )
+	static bool simplify_expression_i( expression::reference& exp, bool pretty, int64_t max_depth, bool unpack )
 	{
 		using namespace logger;
 
 		if ( max_depth == 0 )
 			throw join_depth_exception{};
+
+		// Clear lazy if not done.
+		//
+		if ( exp->is_lazy )
+			( +exp )->is_lazy = false;
 
 		// If not an expression, we cannot simplify further.
 		//
@@ -271,7 +544,8 @@ namespace vtil::symbolic
 
 		// Lookup the expression in the cache.
 		//
-		auto [cache_entry, success_flag, found] = lookup_simplifier_cache( exp );
+		auto& lcache = local_cache;
+		auto [cache_entry, success_flag, found, _lock] = lcache.lookup( exp );
 
 		// If we resolved a valid cache entry:
 		//
@@ -333,7 +607,7 @@ namespace vtil::symbolic
 			}
 
 			exp->simplify_hint = true;
-			cache_entry = *exp;
+			cache_entry = exp;
 			return success_flag;
 		}
 
@@ -345,7 +619,7 @@ namespace vtil::symbolic
 			//
 			simplify_expression( exp, pretty, max_depth - 1 );
 			exp->simplify_hint = true;
-			cache_entry = *exp;
+			cache_entry = exp;
 			success_flag = true;
 			return true;
 		}
@@ -377,7 +651,7 @@ namespace vtil::symbolic
 				//
 				simplify_expression( exp, pretty, max_depth - 1 );
 				exp->simplify_hint = true;
-				cache_entry = *exp;
+				cache_entry = exp;
 				success_flag = true;
 				return true;
 			}
@@ -402,31 +676,76 @@ namespace vtil::symbolic
 			return success_flag;
 		}
 
+		// Enumerate each universal simplifier:
+		//
+		for ( auto& [dir_src, dir_dst] : get_universal_simplifiers( exp->op ) )
+		{
+			// If we can transform the expression by the directive set:
+			//
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, max_depth ) )
+			{
+#if VTIL_SYMEX_SIMPLIFY_VERBOSE
+				log<CON_GRN>( "[Simplify] %s => %s\n", *dir_src, *dir_dst );
+				log<CON_GRN>( "= %s [By simplify directive]\n", *exp_new );
+#endif
+				// Recurse, set the hint and return the simplified instance.
+				//
+				simplify_expression( exp_new, pretty, max_depth );
+				exp_new->simplify_hint = true;
+				cache_entry = exp_new;
+				if( success_flag = !exp->is_identical( *exp_new ) )
+					exp = exp_new;
+				return success_flag;
+			}
+		}
+
+		// If it is a boolean expression:
+		//
+		if ( exp->size() == 1 )
+		{
+			// Enumerate each universal simplifier:
+			//
+			for ( auto& [dir_src, dir_dst] : get_boolean_simplifiers( exp->op ) )
+			{
+				// If we can transform the expression by the directive set:
+				//
+				if ( auto exp_new = transform( exp, dir_src, dir_dst, max_depth ) )
+				{
+#if VTIL_SYMEX_SIMPLIFY_VERBOSE
+					log<CON_GRN>( "[Simplify] %s => %s\n", *dir_src, *dir_dst );
+					log<CON_GRN>( "= %s [By simplify directive]\n", *exp_new );
+#endif
+					// Recurse, set the hint and return the simplified instance.
+					//
+					simplify_expression( exp_new, pretty, max_depth );
+					exp_new->simplify_hint = true;
+					cache_entry = exp_new;
+					if ( success_flag = !exp->is_identical( *exp_new ) )
+						exp = exp_new;
+					return success_flag;
+				}
+			}
+		}
+
 		// Declare the filter.
 		//
-		expression_filter_t filter;
-
-		// If no maximum depth was set:
-		//
-		if ( max_depth < 0 )
+		auto filter = [ &, max_depth ] ( auto& exp_new )
 		{
-			filter = [ & ] ( auto& exp_new )
+			if ( max_depth < 0 )
 			{
 				// If complexity was reduced already, pass.
 				//
 				if ( exp_new->complexity < exp->complexity )
 					return true;
 
-				// Save current cache iterator.
-				//
-				auto it0 = simplifier_cache.end();
-
 				// Try simplifying with maximum depth set as expression's
 				// depth times two and pass if complexity was reduced.
 				//
 				try
 				{
+					lcache.begin_speculative();
 					simplify_expression( exp_new, false, exp_new->depth * 2 );
+					lcache.join_speculative();
 					return exp_new->complexity < exp->complexity;
 				}
 				// If maximum depth was reached, revert any changes to the cache
@@ -434,16 +753,11 @@ namespace vtil::symbolic
 				//
 				catch ( join_depth_exception& )
 				{
-					simplifier_cache.erase( it0, simplifier_cache.end() );
+					lcache.trash_speculative();
 					return false;
 				}
-			};
-		}
-		// Else:
-		//
-		else
-		{
-			filter = [ & ] ( auto& exp_new )
+			}
+			else
 			{
 				// If complexity was reduced already, pass.
 				//
@@ -455,67 +769,16 @@ namespace vtil::symbolic
 				//
 				simplify_expression( exp_new, false, max_depth - 1 );
 				return exp_new->complexity < exp->complexity;
-			};
-		}
-
-		// Enumerate each universal simplifier:
-		//
-		for ( auto [dir_src, dir_dst] : get_universal_simplifiers( exp->op ) )
-		{
-			// If we can transform the expression by the directive set:
-			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst, {}, max_depth ) )
-			{
-#if VTIL_SYMEX_SIMPLIFY_VERBOSE
-				log<CON_GRN>( "[Simplify] %s => %s\n", *dir_src, *dir_dst );
-				log<CON_GRN>( "= %s [By simplify directive]\n", *exp_new );
-#endif
-				// Recurse, set the hint and return the simplified instance.
-				//
-				simplify_expression( exp_new, pretty, max_depth );
-				exp_new->simplify_hint = true;
-				cache_entry = exp_new;
-				success_flag = !exp->is_identical( *exp_new );
-				exp = exp_new;
-				return success_flag;
 			}
-		}
-
-		// If it is a boolean expression:
-		//
-		if ( exp->size() == 1 )
-		{
-			// Enumerate each universal simplifier:
-			//
-			for ( auto [dir_src, dir_dst] : get_boolean_simplifiers( exp->op ) )
-			{
-				// If we can transform the expression by the directive set:
-				//
-				if ( auto exp_new = transform( exp, dir_src, dir_dst, {}, max_depth ) )
-				{
-#if VTIL_SYMEX_SIMPLIFY_VERBOSE
-					log<CON_GRN>( "[Simplify] %s => %s\n", *dir_src, *dir_dst );
-					log<CON_GRN>( "= %s [By simplify directive]\n", *exp_new );
-#endif
-					// Recurse, set the hint and return the simplified instance.
-					//
-					simplify_expression( exp_new, pretty, max_depth );
-					exp_new->simplify_hint = true;
-					cache_entry = exp_new;
-					success_flag = !exp->is_identical( *exp_new );
-					exp = exp_new;
-					return success_flag;
-				}
-			}
-		}
+		};
 
 		// Enumerate each join descriptor:
 		//
-		for ( auto [dir_src, dir_dst] : get_join_descriptors( exp->op ) )
+		for ( auto& [dir_src, dir_dst] : get_join_descriptors( exp->op ) )
 		{
 			// If we can transform the expression by the directive set:
 			//
-			if ( auto exp_new = transform( exp, dir_src, dir_dst, filter, max_depth ) )
+			if ( auto exp_new = transform( exp, dir_src, dir_dst, max_depth, filter ) )
 			{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 				log<CON_GRN>( "[Join] %s => %s\n", *dir_src, *dir_dst );
@@ -527,8 +790,8 @@ namespace vtil::symbolic
 				simplify_expression( exp_new, pretty, max_depth - 1 );
 				exp_new->simplify_hint = true;
 				cache_entry = exp_new;
-				success_flag = !exp->is_identical( *exp_new );
-				exp = exp_new;
+				if ( success_flag = !exp->is_identical( *exp_new ) )
+					exp = exp_new;
 				return success_flag;
 			}
 		}
@@ -539,11 +802,11 @@ namespace vtil::symbolic
 		{
 			// Enumerate each join descriptor:
 			//
-			for ( auto [dir_src, dir_dst] : get_boolean_joiners( exp->op ) )
+			for ( auto& [dir_src, dir_dst] : get_boolean_joiners( exp->op ) )
 			{
 				// If we can transform the expression by the directive set:
 				//
-				if ( auto exp_new = transform( exp, dir_src, dir_dst, filter, max_depth ) )
+				if ( auto exp_new = transform( exp, dir_src, dir_dst, max_depth, filter ) )
 				{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 					log<CON_GRN>( "[Join] %s => %s\n", *dir_src, *dir_dst );
@@ -555,8 +818,8 @@ namespace vtil::symbolic
 					simplify_expression( exp_new, pretty, max_depth - 1 );
 					exp_new->simplify_hint = true;
 					cache_entry = exp_new;
-					success_flag = !exp->is_identical( *exp_new );
-					exp = exp_new;
+					if ( success_flag = !exp->is_identical( *exp_new ) )
+						exp = exp_new;
 					return success_flag;
 				}
 			}
@@ -568,12 +831,12 @@ namespace vtil::symbolic
 		{
 			// Enumerate each unpack descriptor:
 			//
-			for ( auto [dir_src, dir_dst] : get_unpack_descriptors( exp->op ) )
+			for ( auto& [dir_src, dir_dst] : get_unpack_descriptors( exp->op ) )
 			{
 				// If we can transform the expression by the directive set:
 				//
-				if ( auto exp_new = transform( exp, dir_src, dir_dst, 
-					 [ & ] ( auto& exp_new ) { simplify_expression( exp_new, true, max_depth - 1 ); return exp_new->complexity < exp->complexity; }, max_depth ) )
+				if ( auto exp_new = transform( exp, dir_src, dir_dst, max_depth,
+					 [ & ] ( auto& exp_new ) { simplify_expression( exp_new, true, max_depth - 1 ); return exp_new->complexity < exp->complexity; } ) )
 				{
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
 					log<CON_YLW>( "[Unpack] %s => %s\n", *dir_src, *dir_dst );
@@ -584,8 +847,8 @@ namespace vtil::symbolic
 					//
 					exp_new->simplify_hint = true;
 					cache_entry = exp_new;
-					success_flag = !exp->is_identical( *exp_new );
-					exp = exp_new;
+					if ( success_flag = !exp->is_identical( *exp_new ) )
+						exp = exp_new;
 					return success_flag;
 				}
 			}
@@ -602,5 +865,20 @@ namespace vtil::symbolic
 		log( "= %s\n\n", *exp );
 #endif
 		return false;
+	}
+
+	// Simple routine wrapping real simplification to instrument it for any reason when needed.
+	//
+	bool simplify_expression( expression::reference& exp, bool pretty, int64_t max_depth, bool unpack )
+	{
+		/*expression::reference def = exp;
+		auto [result, t] = profile( [ & ] ()
+		{
+			return simplify_expression_i( exp, pretty, max_depth, unpack );
+		} );
+
+		if ( t > 500ms )
+			logger::log( "%s took %s\n", def, t );*/
+		return simplify_expression_i( exp, pretty, max_depth, unpack );
 	}
 };

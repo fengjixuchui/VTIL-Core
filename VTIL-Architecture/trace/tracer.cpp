@@ -28,6 +28,7 @@
 #include "tracer.hpp"
 #include <vtil/io>
 #include "../vm/lambda.hpp"
+#include <vtil/utility>
 
 namespace vtil
 {
@@ -48,22 +49,21 @@ namespace vtil
 		}
 	};
 
-	using partial_tracer_t = std::function<symbolic::expression( bitcnt_t offset, bitcnt_t size )>;
-
 	// Forward defs.
 	//
-	static void rtrace_primitive( symbolic::expression& out, const symbolic::variable& lookup, tracer* tracer, path_entry* prev_link, int64_t );
+	static symbolic::expression::reference rtrace_primitive( const symbolic::variable& lookup, tracer* tracer, const path_entry& prev_link, int64_t limit );
 
 	// Given a partial tracer, this routine will determine the full value of the variable
 	// at the given position where a partial write was found.
 	//
-	static symbolic::expression resolve_partial( const symbolic::access_details& access, bitcnt_t bit_count, const partial_tracer_t& ptracer )
+	template<typename T>
+	static symbolic::expression::reference resolve_partial( const symbolic::access_details& access, bitcnt_t bit_count, const T& ptracer )
 	{
 		using namespace logger;
 
 		// Fetch the result of this operation.
 		//
-		symbolic::expression base = ptracer( access.bit_offset, access.bit_count );
+		auto base = ptracer( access.bit_offset, access.bit_count );
 
 		// Trace a low part if we have to.
 		//
@@ -125,22 +125,21 @@ namespace vtil
 
 	// Applies transformation per each unique variable in the expression.
 	//
-	static void transform_variables( symbolic::expression& inout, const std::function<symbolic::expression(const symbolic::variable&)>& fn )
+	static void transform_variables( symbolic::expression::reference& inout, const std::function<symbolic::expression::reference(const symbolic::variable&)>& fn )
 	{
 		// Take fast path if single variable.
 		//
-		if ( inout.is_variable() )
+		if ( inout->is_variable() )
 		{
-			inout = fn( inout.uid.get<symbolic::variable>() );
+			if ( symbolic::expression::reference res = fn( inout->uid.get<symbolic::variable>() ) )
+				inout = res;
 			return;
 		}
 
-		std::unordered_map<symbolic::variable, symbolic::expression::reference, hasher<>> cache;
-		cache.reserve( inout.depth );
+		std::unordered_map<symbolic::variable, symbolic::expression::reference> cache;
+		cache.reserve( inout->depth );
 		
-		// TODO: fix
-		symbolic::expression::reference ref = make_local_reference( &inout );
-		ref.transform( [ &cache, &fn ] ( symbolic::expression::delegate& exp )
+		inout.transform( [ &cache, &fn ] ( symbolic::expression::delegate& exp )
 		{
 			// Skip if not variable.
 			//
@@ -164,8 +163,6 @@ namespace vtil
 					exp = cit->second;
 			}
 		}, true, false );
-		if ( &*ref != &inout )
-			inout = *ref;
 	}
 
     // Propagates all variables in the reference expression onto the new iterator, if no history pointer given will do trace instead of rtrace.
@@ -173,7 +170,7 @@ namespace vtil
 	// meaning the origin expression was a variable and it infinite-looped during propagation by itself.
     // - Note: New iterator should be a connected block's end.
 	//
-    static bool propagate( symbolic::expression& ref, const il_const_iterator& it, tracer* tracer, path_entry* prev_link, int64_t limit )
+    static bool propagate( symbolic::expression::reference& ref, const il_const_iterator& it, tracer* tracer, optional_creference<path_entry> prev_link, int64_t limit )
     {
         using namespace logger;
 
@@ -182,7 +179,7 @@ namespace vtil
 #endif
 
 		std::optional<bool> result = {};
-		transform_variables( ref, [ & ] ( const symbolic::variable& _var ) -> symbolic::expression
+		transform_variables( ref, [ & ] ( const symbolic::variable& _var ) -> symbolic::expression::reference
 		{
 			// If result is already decided, return as is.
 			//
@@ -211,7 +208,7 @@ namespace vtil
 					warning(
 						"Local variable %s is used before value assignment (Block %x).\n",
 						var,
-						var.at.container->entry_vip
+						var.at.block->entry_vip
 					);
 				}
 
@@ -234,7 +231,7 @@ namespace vtil
 				// Fail if propagation fails.
 				//
 				symbolic::expression::reference mem_ptr = std::move( mem.base.base );
-				propagate( *+mem_ptr, it, tracer, nullptr, limit );
+				propagate( mem_ptr, it, tracer->purify(), std::nullopt, limit );
 				if ( !mem_ptr )
 				{
 					result = false;
@@ -255,21 +252,21 @@ namespace vtil
 
             // Trace the variable in the destination block, fail if it fails.
             //
-			symbolic::expression var_traced;
+			symbolic::expression::reference var_traced;
 			if ( prev_link )
-				rtrace_primitive( var_traced, var, tracer, prev_link, limit );
+				var_traced = rtrace_primitive( var, tracer, prev_link, limit );
 			else
 				var_traced = tracer->trace( var );
 			if ( !var_traced )
 			{
-				result = ref.is_variable();
+				result = ref->is_variable();
 				return {};
 			}
 
             // If we are tracing the value of RSP, add the stack pointer delta between blocks.
             //
-            if ( var.is_register() && var.reg().is_stack_pointer() && it.container->sp_offset )
-                var_traced = var_traced + it.container->sp_offset;
+            if ( var.is_register() && var.reg().is_stack_pointer() && it.block->sp_offset )
+                var_traced = var_traced + it.block->sp_offset;
 			return var_traced;
 		} );
 
@@ -286,25 +283,22 @@ namespace vtil
 
 	// Internal implementation of ::rtrace with a path history.
 	//
-	static void rtrace_primitive( symbolic::expression& out, const symbolic::variable& lookup, tracer* tracer, path_entry* prev_link, int64_t limit )
+	static symbolic::expression::reference rtrace_primitive( const symbolic::variable& lookup, tracer* tracer, const path_entry& prev_link, int64_t limit )
 	{
 		using namespace logger;
 
 		// Trace through the current block first.
 		//
-		symbolic::expression result = tracer->trace( lookup );
+		auto result = tracer->trace( lookup );
 
 		// If limit was reached, return as is.
 		//
 		if ( --limit == 0 )
-		{
-			out = result;
-			return;
-		}
+			return result;
 
 		// If result has any variables:
 		//
-		if ( result.count_unique_variables() != 0 )
+		if ( result->value.is_unknown() )
 		{
 			// Determine the paths we can take to iterate further.
 			//
@@ -323,21 +317,22 @@ namespace vtil
 #endif
 				// Save current result as default result and clear it.
 				//
-				symbolic::expression default_result = {};
+				symbolic::expression::reference default_result = {};
 				std::swap( result, default_result );
 
 				// For each path:
 				//
+				bool potential_loop = true;// it_list.size() > 1 || it_list[ 0 ].block == lookup.at.block; // TODO: Fix
 				for ( auto& it : it_list )
 				{
 					// If we've taken this path more than twice, skip it.
 					//
-					if ( prev_link->count( lookup.at.container, it.container ) >= 2 )
+					if ( !potential_loop || prev_link.count( lookup.at.block, it.block ) >= 2 )
 					{
 #if VTIL_OPT_TRACE_VERBOSE
 						// Log skipping of path.
 						//
-						log<CON_CYN>( "Path [%llx->%llx] is not taken as it's n-looping.\n", lookup.at.container->entry_vip, it.container->entry_vip );
+						log<CON_CYN>( "Path [%llx->%llx] is not taken as it's n-looping.\n", lookup.at.block->entry_vip, it.block->entry_vip );
 #endif
 						continue;
 					}
@@ -345,17 +340,19 @@ namespace vtil
 #if VTIL_OPT_TRACE_VERBOSE
 					// Log tracing of path.
 					//
-					log<CON_YLW>( "Taking path [%llx->%llx]\n", lookup.at.container->entry_vip, it.container->entry_vip );
+					log<CON_YLW>( "Taking path [%llx->%llx]\n", lookup.at.block->entry_vip, it.block->entry_vip );
 #endif
 					// Propagate each variable onto to the destination block, if total fail, skip path.
 					//
-					path_entry entry = {
-						.prev = prev_link,
-						.src = lookup.at.container,
-						.dst = it.container
-					};
-					symbolic::expression exp = default_result;
-					if ( propagate( exp, it, tracer, &entry, limit ) )
+					symbolic::expression::reference exp = default_result;
+					bool total_fail = propagate(
+						exp,
+						it,
+						tracer,
+						potential_loop ? path_entry{ .prev = &prev_link, .src = lookup.at.block, .dst = it.block } : prev_link,
+						limit
+					);
+					if ( total_fail )
 						continue;
 
 #if VTIL_OPT_TRACE_VERBOSE
@@ -365,12 +362,12 @@ namespace vtil
 #endif
 					// If no result is set yet, assign the current expression.
 					//
-					if ( !result.is_valid() )
+					if ( !result )
 						result = exp;
 
 					// If expression is invalid or not equal to previous result, fail.
 					//
-					if ( !exp.is_valid() || !exp.equals( result ) )
+					if ( !exp || !exp->equals( *result ) )
 					{
 #if VTIL_OPT_TRACE_VERBOSE
 						// Log decision.
@@ -379,7 +376,7 @@ namespace vtil
 #endif
 						// If result was null, return lookup.
 						//
-						if ( !exp.is_valid() )
+						if ( !exp )
 						{
 							result = lookup.to_expression();
 						}
@@ -388,16 +385,15 @@ namespace vtil
 						else
 						{
 							result = std::move( default_result );
-
-							// TODO: fix
-							symbolic::expression::reference ref = make_local_reference( &result );
-							ref.transform( [ ] ( symbolic::expression::delegate& exp )
+							result.transform( [ ] ( symbolic::expression::delegate& exp )
 							{
 								if ( exp->is_variable() )
-									( +exp )->uid.get<symbolic::variable>().is_branch_dependant = true;
+								{
+									symbolic::variable&& var = std::move( ( +exp )->uid.get<symbolic::variable>() );
+									var.is_branch_dependant = true;
+									*+exp = { var, exp->size() };
+								}
 							}, true, false );
-							if ( &*ref != &result )
-								result = *ref;
 						}
 						break;
 					}
@@ -406,7 +402,7 @@ namespace vtil
 				// If result is null, use default result if the call was not from propagate(),
 				// determined by history having entries set.
 				//
-				if ( !result && prev_link->prev == nullptr ) 
+				if ( !result && prev_link.prev == nullptr )
 					result = std::move( default_result );
 			}
 		}
@@ -415,14 +411,14 @@ namespace vtil
 		//
 		log<CON_BRG>( "= %s\n", result );
 #endif
-		out = result.simplify();
+		return result.simplify();
 	}
 
 	// Traces a variable across the basic block it belongs to and generates a symbolic expression 
 	// that describes it's value at the bound point. The provided variable should not contain a 
 	// pointer with out-of-block expressions.
 	//
-	symbolic::expression tracer::trace( const symbolic::variable& lookup )
+	symbolic::expression::reference tracer::trace( const symbolic::variable& lookup )
 	{
 		using namespace logger;
 
@@ -470,12 +466,11 @@ namespace vtil
 		bitcnt_t result_bcnt = lookup.bit_count();
 		if ( details.bit_offset != 0 || details.bit_count != result_bcnt )
 		{
-			// Define partial tracer.
+			// Redirect to partial resolver.
 			//
-			partial_tracer_t ptrace;
 			if ( lookup.is_register() )
 			{
-				ptrace = [ &, &reg = lookup.reg(), it = std::next( it ) ]( bitcnt_t bit_offset, bitcnt_t bit_count )
+				return resolve_partial( details, result_bcnt, [ &, &reg = lookup.reg(), it = std::next( it ) ]( bitcnt_t bit_offset, bitcnt_t bit_count )
 				{
 					symbolic::variable::register_t tmp = {
 						reg.flags,
@@ -485,11 +480,11 @@ namespace vtil
 						reg.architecture
 					};
 					return tracer::trace( { it, tmp } );
-				};
+				} );
 			}
 			else
 			{
-				ptrace = [ &, &mem = lookup.mem(), it = std::next( it ) ]( bitcnt_t bit_offset, bitcnt_t bit_count )
+				return resolve_partial( details, result_bcnt, [ &, &mem = lookup.mem(), it = std::next( it ) ]( bitcnt_t bit_offset, bitcnt_t bit_count )
 				{
 					fassert( !( ( bit_offset | bit_count ) & 7 ) );
 					symbolic::variable::memory_t tmp = {
@@ -497,12 +492,8 @@ namespace vtil
 						bit_count
 					};
 					return tracer::trace( { it, tmp } );
-				};
+				} );
 			}
-
-			// Redirect to partial resolver.
-			//
-			return resolve_partial( details, result_bcnt, ptrace );
 		}
 
 		// Create a lambda virtual machine and allocate a temporary result.
@@ -517,7 +508,7 @@ namespace vtil
 		lvm.hooks.read_memory = [ & ] ( const symbolic::expression::reference& pointer, size_t byte_count )
 		{
 			auto exp = trace( symbolic::variable{ it, { pointer, math::narrow_cast<bitcnt_t>( byte_count * 8 ) } } );
-			return exp.is_valid() ? exp.resize( result_bcnt ) : exp;
+			return exp ? exp.resize( result_bcnt ) : exp;
 		};
 		lvm.hooks.write_register = [ & ] ( const register_desc& desc, symbolic::expression::reference value )
 		{
@@ -525,16 +516,17 @@ namespace vtil
 				result = std::move( value );
 		};
 
-		lvm.hooks.write_memory = [ & ] ( const symbolic::expression::reference& pointer, symbolic::expression::reference value )
+		lvm.hooks.write_memory = [ & ] ( const symbolic::expression::reference& pointer, deferred_value<symbolic::expression::reference> value, bitcnt_t size )
 		{
 			if ( pointer->equals( *lookup.mem().decay() ) )
-				result = std::move( value );
+				result = std::move( value.get() );
+			return true;
 		};
 
 		// Step one instruction, if result was successfuly captured, return.
 		//
 		if ( lvm.execute( *it ), result )
-			return *result;
+			return result;
 
 		// If we could not describe the behaviour, increment iterator and return.
 		//
@@ -545,28 +537,26 @@ namespace vtil
 	// for it at the specified point of the block, limit determines the maximum number of blocks 
 	// to trace backwards, any negative number implies infinite since it won't reach 0.
 	//
-	symbolic::expression tracer::rtrace( const symbolic::variable& lookup, int64_t limit )
+	symbolic::expression::reference tracer::rtrace( const symbolic::variable& lookup, int64_t limit )
 	{
-		bool recursive_flag_prev = recursive_flag;
-		recursive_flag = true;
+		bool recursive_flag_prev = std::exchange( recursive_flag, true );
 		path_entry list_head = { nullptr, nullptr, nullptr };
-		symbolic::expression exp;
-		rtrace_primitive( exp, lookup, this, &list_head, limit + 1 );
+		auto exp = rtrace_primitive( lookup, this, list_head, limit + 1 );
 		recursive_flag = recursive_flag_prev;
 		return exp;
 	}
 	
 	// Wrappers around trace and rtrace that can trace an entire expression.
 	//
-	symbolic::expression tracer::trace_exp( const symbolic::expression& exp )
+	symbolic::expression::reference tracer::trace_exp( const symbolic::expression::reference& exp )
 	{
-		symbolic::expression out = exp;
+		symbolic::expression::reference out = exp;
 		transform_variables( out, [ & ] ( const symbolic::variable& var ) { return trace( var ); } );
 		return out.simplify();
 	}
-	symbolic::expression tracer::rtrace_exp( const symbolic::expression& exp, int64_t limit )
+	symbolic::expression::reference tracer::rtrace_exp( const symbolic::expression::reference& exp, int64_t limit )
 	{
-		symbolic::expression out = exp;
+		symbolic::expression::reference out = exp;
 		transform_variables( out, [ & ] ( const symbolic::variable& var ) { return rtrace( var, limit ); } );
 		return out.simplify();
 	}

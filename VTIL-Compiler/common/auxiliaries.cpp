@@ -26,7 +26,6 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #include "auxiliaries.hpp"
-#include <vtil/query>
 #include <vtil/io>
 #include <vtil/math>
 
@@ -76,7 +75,7 @@ namespace vtil::optimizer::aux
 		{
 			// Restrict iteration upto origin and forward to rtrace.
 			//
-			lookup.at.restrict_path( var.at.container, false );
+			lookup.at.restrict_path( var.at.block, false );
 			return tracer->rtrace_p( std::move( lookup ) );
 		};
 
@@ -84,7 +83,7 @@ namespace vtil::optimizer::aux
 		//
 		constexpr auto is_improper_end = [ ] ( const il_const_iterator& it ) 
 		{
-			return std::next( it ).is_end() && it.container->next.empty() && it->base != &ins::vexit;
+			return std::next( it ).is_end() && it.block->next.empty() && it->base != &ins::vexit;
 		};
 		if( is_improper_end( var.at ) )
 			return true;
@@ -131,22 +130,22 @@ namespace vtil::optimizer::aux
 			{
 				// Propagate pointer if needed.
 				//
-				if ( local_var.at.container != it.container )
+				if ( local_var.at.block != it.block )
 				{
-					if ( local_var.at.container->sp_index == 0 )
+					if ( local_var.at.block->sp_index == 0 )
 					{
 						symbolic::expression exp =
 							local_var.mem().decay()
-							- local_var.at.container->sp_offset
-							+ symbolic::variable{ it.container->begin(), REG_SP }.to_expression()
-							- symbolic::variable{ local_var.at.container->begin(), REG_SP }.to_expression();
-						local_var = symbolic::variable{ it.container->begin(), { symbolic::pointer{ exp }, local_var.mem().bit_count } };
+							- local_var.at.block->sp_offset
+							+ symbolic::variable{ it.block->begin(), REG_SP }.to_expression()
+							- symbolic::variable{ local_var.at.block->begin(), REG_SP }.to_expression();
+						local_var = symbolic::variable{ it.block->begin(), { symbolic::pointer{ exp }, local_var.mem().bit_count } };
 					}
 				}
 
 				// If instruction is branching, check if stack is discarded.
 				//
-				if ( it->base->is_branching() && it.container->owner->routine_convention.purge_stack )
+				if ( it->base->is_branching() && it.block->owner->routine_convention.purge_stack )
 				{
 					// Assert this instruction does not read memory.
 					//
@@ -172,22 +171,23 @@ namespace vtil::optimizer::aux
 
 			// Check if variable is accessed by this instruction.
 			//
-			auto details = local_var.accessed_by( it, tracer, !is_restricted );
-
-			// If possible read, declare used.
-			//
-			if ( details.read )
+			if ( auto details = local_var.accessed_by( it, tracer, !is_restricted ) )
 			{
-				if ( details.is_unknown() || ( mask & math::fill( details.bit_count, details.bit_offset ) ) )
-					return declare_used();
-			}
-			// If known overwrite:
-			//
-			else if ( details.write && !details.is_unknown() )
-			{
-				// Clear the mask.
+				// If possible read, declare used.
 				//
-				mask &= ~math::fill( details.bit_count, details.bit_offset );
+				if ( details.read )
+				{
+					if ( details.is_unknown() || ( mask & math::fill( details.bit_count, details.bit_offset ) ) )
+						return declare_used();
+				}
+				// If known overwrite:
+				//
+				else if ( details.write && !details.is_unknown() )
+				{
+					// Clear the mask.
+					//
+					mask &= ~math::fill( details.bit_count, details.bit_offset );
+				}
 			}
 
 			// Break if value is dead.
@@ -205,10 +205,11 @@ namespace vtil::optimizer::aux
 
 		// Invoke the enumerator.
 		//
-		var.at.container->owner->enumerate(
+		auto it = var.at;
+		if ( is_restricted ) it.restrict_path();
+		var.at.block->owner->enumerate(
 			enumerator,
-			var.at,
-			rec ? il_const_iterator{} : var.at.container->end()
+			it
 		);
 
 		// If found an instruction reading the value, indicate so.
@@ -223,7 +224,7 @@ namespace vtil::optimizer::aux
 
 		// Report used if global register and block is not exiting vm.
 		//
-		return ( !var.at.container->is_complete() || var.at.container->stream.back().base != &ins::vexit ) && 
+		return ( !var.at.block->is_complete() || var.at.block->back().base != &ins::vexit ) && 
 			   ( !var.is_register() || var.reg().is_global() );
 	}
 
@@ -247,7 +248,7 @@ namespace vtil::optimizer::aux
 
 			// If local report dead if cross-block.
 			//
-			if ( var.reg().is_local() && var.at.container != dst.container )
+			if ( var.reg().is_local() && var.at.block != dst.block )
 				return false;
 		}
 
@@ -270,7 +271,7 @@ namespace vtil::optimizer::aux
 			//
 			return enumerator::ocontinue;
 		};
-		dst.container->owner->enumerate( check, var.at, dst );
+		dst.block->owner->enumerate( check, var.at, dst );
 		return is_alive;
 	}
 
@@ -283,19 +284,19 @@ namespace vtil::optimizer::aux
 		// Drop const-qualifiers, this operation is not illegal since we're passed 
 		// non-constant iterator, meaning we have access to the routine itself.
 		//
-		basic_block* source = ( basic_block* ) var.at.container;
+		basic_block* source = ( basic_block* ) var.at.block;
 		il_iterator access_point = source->acquire( var.at );
 
 		// Allocate an appropriate temporary based on local-ness.
 		//
-		register_desc temporary = it.container != var.at.container
+		register_desc temporary = it.block != var.at.block
 			? source->owner->alloc( var.bit_count() )
 			: source->tmp( var.bit_count() );
 
 		// Insert a move-to-temporary before this instruction and swap each read 
 		// of the register we revived at the access point with the new temporary.
 		//
-		for ( auto [op, type] : access_point->enum_operands() )
+		for ( auto [op, type] : ( +access_point )->enum_operands() )
 			if ( type < operand_type::write && op.is_register() && op.reg() == var.reg() )
 				op = temporary;
 		source->insert( access_point, { &ins::mov, { temporary, var.reg() } } );
@@ -316,10 +317,10 @@ namespace vtil::optimizer::aux
 		//
 		const auto trace = [ & ] ( symbolic::variable&& lookup )
 		{
-			symbolic::expression::reference exp;
-			if ( flags.cross_block ) exp = tracer->rtrace( std::move( lookup ) );
-			else                     exp = tracer->trace( std::move( lookup ) );
-			return flags.pack ? symbolic::variable::pack_all( exp ) : exp;
+			symbolic::expression::reference exp = tracer->trace( lookup );
+			if ( flags.cross_block ) exp = tracer->rtrace_exp( exp );
+			if ( flags.pack )        symbolic::variable::pack_all( exp );
+			return exp;
 		};
 
 		// Declare operand->expression helper.
@@ -343,7 +344,7 @@ namespace vtil::optimizer::aux
 					if ( var.is_register() && var.reg() == REG_IMGBASE )
 						*+ex = { 0, ex->size() };
 				}
-			}, true ).simplify( true );
+			}, true, false ).simplify( true );
 
 			// If parsing requested:
 			//

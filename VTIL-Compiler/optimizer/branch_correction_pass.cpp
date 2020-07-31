@@ -106,17 +106,23 @@ namespace vtil::optimizer
 		{
 			// Attempts to revive an expression via cache.
 			//
-			const auto revive_via_cache = [ & ] ( const symbolic::expression& exp, cached_tracer* tr ) -> std::future<operand>
+			using deferred_operand = deferred_result<
+				operand,
+				decltype( &aux::revive_register ),
+				symbolic::variable, const il_iterator&
+			>;
+
+			const auto revive_via_cache = [ & ] ( const symbolic::expression::reference& exp, cached_tracer* tr ) -> deferred_operand
 			{
 				// If immediate return as is.
 				//
-				if ( exp.is_constant() )
-					return std::async( std::launch::deferred, [ op = operand{ *exp.get<uint64_t>(), exp.size() } ]() { return op; } );
+				if ( exp->is_constant() )
+					return operand{ *exp->get<uint64_t>(), exp->size() };
 
 				// If expression is not a register:
 				//
 				symbolic::variable var_reg;
-				if ( !exp.is_variable() || !exp.uid.get<symbolic::variable>().is_register() )
+				if ( !exp->is_variable() || !exp->uid.get<symbolic::variable>().is_register() )
 				{
 					// Iterate cache entries:
 					//
@@ -130,7 +136,7 @@ namespace vtil::optimizer
 
 						// If expressions are not identical skip.
 						//
-						if ( !ex->is_identical( exp ) )
+						if ( !ex->is_identical( *exp ) )
 							continue;
 
 						// Set var_reg and break.
@@ -141,7 +147,7 @@ namespace vtil::optimizer
 				}
 				else
 				{
-					var_reg = exp.uid.get<symbolic::variable>();
+					var_reg = exp->uid.get<symbolic::variable>();
 				}
 
 				// Fail if invalid.
@@ -152,27 +158,27 @@ namespace vtil::optimizer
 				// Check if alive, if not revive, else return as is.
 				//
 				if ( aux::is_alive( var_reg, branch, xblock, &ctracer ) )
-					return std::async( std::launch::deferred, [ op = operand{ var_reg.reg() } ]() { return op; } );
+					return operand{ var_reg.reg() };
 				else
-					return std::async( std::launch::deferred, [ = ]() -> operand { return aux::revive_register( var_reg, branch ); } );
+					return deferred_operand{ &aux::revive_register, var_reg, branch };
 			};
 
 			// Convert [cc] [d1] [d2] in order.
 			//
-			auto op_cc = revive_via_cache( *lbranch_info.cc, &local_tracer );
-			if ( op_cc.valid() )
+			deferred_operand op_cc = revive_via_cache( lbranch_info.cc, &local_tracer );
+			if ( op_cc.is_valid() )
 			{
 				bool fail = false;
-				std::future<operand> dsts[ 2 ];
+				deferred_operand dsts[ 2 ];
 				for ( auto [out, blocal, bglobal] : zip( dsts, lbranch_info.destinations, branch_info.destinations ) )
 				{
-					std::future<operand> op;
+					deferred_operand op;
 					if ( blocal->complexity <= bglobal->complexity )
-						op = revive_via_cache( *blocal, &local_tracer );
+						op = revive_via_cache( blocal, &local_tracer );
 					else
-						op = revive_via_cache( *bglobal, &ctracer );
+						op = revive_via_cache( bglobal, &ctracer );
 
-					if ( !op.valid() )
+					if ( !op.is_valid() )
 					{
 						fail = true;
 						break;
@@ -186,9 +192,9 @@ namespace vtil::optimizer
 				{
 					operand cc_op = op_cc.get();
 					cc_op.reg().bit_count = 1;
-
-					branch->base = &ins::js;
-					branch->operands = {
+					
+					( +branch )->base = &ins::js;
+					( +branch )->operands = {
 						cc_op,
 						dsts[ 0 ].get(),
 						dsts[ 1 ].get()
@@ -206,7 +212,7 @@ namespace vtil::optimizer
 			 branch->operands[ 0 ].is_register() )
 		{
 
-			branch->operands[ 0 ] = { *branch_info.destinations[ 0 ]->get<vip_t>(), 64 };
+			( +branch )->operands[ 0 ] = { *branch_info.destinations[ 0 ]->get<vip_t>(), 64 };
 			cnt++;
 		}
 
@@ -258,9 +264,10 @@ namespace vtil::optimizer
 			// Flush paths.
 			//
 			rtn->flush_paths();
-			
-			// Return counter as is.
+
+			// Purge simplifier cache and return counter.
 			//
+			symbolic::purge_simplifier_cache();
 			return cnt;
 		}
 		return 0;
