@@ -36,10 +36,7 @@ namespace vtil::symbolic
 
 	// Translates the given directive into an expression (of size given) using the symbol table.
 	//
-	expression::reference translate( const symbol_table_t& sym,
-									 const instance* dir,
-									 bitcnt_t bit_cnt,
-									 int64_t max_depth )
+	expression::reference translate( const symbol_table_t& sym, const instance* dir, bitcnt_t bit_cnt )
 	{
 		using namespace logger;
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
@@ -67,9 +64,9 @@ namespace vtil::symbolic
 				if ( dir->op == math::operator_id::ucast ||
 					 dir->op == math::operator_id::cast )
 				{
-					auto lhs = translate( sym, dir->lhs, 0, max_depth );
+					auto lhs = translate( sym, dir->lhs, 0 );
 					if ( !lhs )	return {};
-					auto rhs = translate( sym, dir->rhs, bit_cnt, max_depth );
+					auto rhs = translate( sym, dir->rhs, bit_cnt );
 					if ( !rhs ) return {};
 
 					if ( auto sz = rhs->get<bitcnt_t>() )
@@ -83,19 +80,29 @@ namespace vtil::symbolic
 				//
 				else if ( dir->lhs )
 				{
-					auto lhs = translate( sym, dir->lhs, bit_cnt, max_depth );
-					if ( !lhs )	return {};
-					auto rhs = translate( sym, dir->rhs, bit_cnt, max_depth );
-					if ( !rhs ) return {};
-					return expression::make( lhs, dir->op, rhs );
+					expression::reference lhs, rhs;
+
+					std::array tx = {
+						std::pair( &lhs, dir->lhs.ptr ),
+						std::pair( &rhs, dir->rhs.ptr )
+					};
+					
+					if ( tx[ 1 ].second->priority > tx[ 0 ].second->priority )
+						std::swap( tx[ 0 ], tx[ 1 ] );
+
+					for( auto& [out, dir] : tx )
+						if ( !( *out = translate( sym, dir, bit_cnt ) ) )
+							return {};
+
+					return expression::make( std::move( lhs ), dir->op, std::move( rhs ) );
 				}
 				// If operation is unary:
 				//
 				else
 				{
-					auto rhs = translate( sym, dir->rhs, bit_cnt, max_depth );
+					auto rhs = translate( sym, dir->rhs, bit_cnt );
 					if ( !rhs ) return {};
-					return expression::make( dir->op, rhs );
+					return expression::make( dir->op, std::move( rhs ) );
 				}
 			}
 			unreachable();
@@ -109,11 +116,11 @@ namespace vtil::symbolic
 			{
 				// If expression translates successfully:
 				//
-				if ( auto e1 = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto e1 = translate( sym, dir->rhs, bit_cnt ) )
 				{
 					// Return only if it was successful.
 					//
-					if ( !e1->simplify_hint && simplify_expression( e1, false, max_depth, false ) )
+					if ( !e1->simplify_hint && simplify_expression( e1, false, false ) )
 						return e1;
 				}
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
@@ -125,11 +132,11 @@ namespace vtil::symbolic
 			{
 				// Translate right hand side.
 				//
-				if ( auto e1 = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto e1 = translate( sym, dir->rhs, bit_cnt ) )
 				{
 					// Simplify the expression.
 					//
-					simplify_expression( e1, false, max_depth, false );
+					simplify_expression( e1, false, false );
 					return e1;
 				}
 				break;
@@ -143,7 +150,7 @@ namespace vtil::symbolic
 
 				// Unpack first expression, if translated successfully, return it as is.
 				//
-				if ( auto e1 = translate( sym, dir->lhs, bit_cnt, max_depth ) )
+				if ( auto e1 = translate( sym, dir->lhs, bit_cnt ) )
 					return e1;
 
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
@@ -152,7 +159,7 @@ namespace vtil::symbolic
 
 				// Unpack second expression, if translated successfully, return it as is.
 				//
-				if ( auto e2 = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto e2 = translate( sym, dir->rhs, bit_cnt ) )
 					return e2;
 
 #if VTIL_SYMEX_SIMPLIFY_VERBOSE
@@ -166,7 +173,7 @@ namespace vtil::symbolic
 
 				// Translate left hand side, if failed to do so or is not equal to [true], fail.
 				//
-				auto condition_status = translate( sym, dir->lhs, 0, max_depth );
+				auto condition_status = translate( sym, dir->lhs, 0 );
 				if ( !condition_status ||
 					 memcmp( condition_status->xvalues().data(), expected.data(), expected.size() * sizeof( expected[ 0 ] ) ) ||
 					 !condition_status.simplify()->get().value_or( false ) )
@@ -180,13 +187,13 @@ namespace vtil::symbolic
 				// Continue the translation from the right hand side.
 				//
 				condition_status.reset();
-				return translate( sym, dir->rhs, bit_cnt, max_depth );
+				return translate( sym, dir->rhs, bit_cnt );
 			}
 			case directive_op_desc::mask_unknown:
 			{
 				// Translate right hand side.
 				//
-				if ( auto exp = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto exp = translate( sym, dir->rhs, bit_cnt ) )
 				{
 					// Return the unknown mask.
 					//
@@ -199,7 +206,7 @@ namespace vtil::symbolic
 			{
 				// Translate right hand side.
 				//
-				if ( auto exp = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto exp = translate( sym, dir->rhs, bit_cnt ) )
 				{
 					// Return the unknown mask.
 					//
@@ -211,7 +218,7 @@ namespace vtil::symbolic
 			{
 				// Translate right hand side.
 				//
-				if ( auto exp = translate( sym, dir->rhs, bit_cnt, max_depth ) )
+				if ( auto exp = translate( sym, dir->rhs, bit_cnt ) )
 				{
 					// Return the unknown mask.
 					//
@@ -233,7 +240,7 @@ namespace vtil::symbolic
 
 				// Continue the translation from the right hand side.
 				//
-				return translate( sym, dir->rhs, bit_cnt, max_depth );
+				return translate( sym, dir->rhs, bit_cnt );
 			}
 			default:
 				unreachable();

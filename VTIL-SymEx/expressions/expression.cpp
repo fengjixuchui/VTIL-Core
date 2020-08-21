@@ -707,7 +707,6 @@ namespace vtil::symbolic
 
 	// Returns whether the given expression is identical to the current instance.
 	//
-	template<size_t depth = 1>
 	static bool is_identical_impl( const expression& self, const expression& other )
 	{
 		if ( &self == &other ) return true;
@@ -726,22 +725,12 @@ namespace vtil::symbolic
 #endif
 			return false;
 		};
+		constexpr auto cmp = is_identical_impl;
 
 		// If hash/size mismatches, return false without checking anything.
 		//
 		if ( self.hash() != other.hash() || self.size() != other.size() )
 			return false;
-
-		// If not in debug mode, assume equivalence after total hash reaches 384 bits.
-		//
-		static constexpr size_t max_depth = 256 / VTIL_HASH_SIZE;
-#ifndef _DEBUG
-		if constexpr ( depth == max_depth ) 
-			return true;
-		constexpr auto cmp = is_identical_impl<depth == max_depth ? max_depth : ( depth + 1 )>;
-#else
-		constexpr auto cmp = is_identical_impl<depth>;
-#endif
 
 		// If variable, check if the identifiers match.
 		//
@@ -773,7 +762,7 @@ namespace vtil::symbolic
 		//
 		return ( desc.is_commutative && cmp( *self.lhs, *other.rhs ) && cmp( *self.rhs, *other.lhs ) ) || report_hash_collision();
 	}
-	bool expression::is_identical( const expression& other ) const { return is_identical_impl<>( *this, other ); }
+	bool expression::is_identical( const expression& other ) const { return is_identical_impl( *this, other ); }
 
 	// Returns whether the given expression is equivalent to the current instance.
 	//
@@ -827,7 +816,7 @@ namespace vtil::symbolic
 	// the UID relation table, otherwise returns nullopt.
 	//
 	using fast_uid_relation_table = stack_vector<std::pair<expression::weak_reference, expression::weak_reference>>;
-	static bool match_to_impl( const expression::reference& a, const expression::reference& b, fast_uid_relation_table* tbl )
+	static bool match_to_impl( const expression::reference& a, const expression::reference& b, fast_uid_relation_table* tbl, bool same_depth )
 	{
 		// If identical, try pushing all variables into the table.
 		//
@@ -854,16 +843,19 @@ namespace vtil::symbolic
 
 		// Check if properties match.
 		//
-		if ( a->signature != b->signature || a->depth != b->depth || a->size() != b->size() )
+		if ( ( same_depth ? a->signature != b->signature : b->signature.can_match( a->signature ) ) || 
+			 ( same_depth ? a->depth != b->depth : a->depth > b->depth ) ||
+			 a->op != b->op ||
+			 a->size() != b->size() )
 			return false;
 
 		// If variable:
 		//
 		if ( a->is_variable() )
 		{
-			// Skip if compared expression is not a variable.
+			// Skip if compared expression is not a variable if same depth is set.
 			//
-			if ( !b->is_variable() )
+			if ( same_depth && !b->is_variable() )
 				return false;
 
 			// Check if this UID is already in the table, if so return the result of
@@ -871,7 +863,7 @@ namespace vtil::symbolic
 			//
 			for ( auto& [src, dst] : *tbl )
 				if ( src->uid == a->uid )
-					return dst->uid == b->uid;
+					return dst->is_identical( *b );
 			tbl->emplace_back( a, b );
 			return true;
 		}
@@ -887,7 +879,7 @@ namespace vtil::symbolic
 		if ( desc.operand_count == 1 )
 		{
 			size_t prev = tbl->size();
-			if ( match_to_impl( a->rhs, b->rhs, tbl ) )
+			if ( match_to_impl( a->rhs, b->rhs, tbl, same_depth ) )
 				return true;
 			tbl->resize( prev );
 			return false;
@@ -896,8 +888,8 @@ namespace vtil::symbolic
 		// If both sides match, return true.
 		//
 		size_t prev = tbl->size();
-		if ( match_to_impl( a->lhs, b->lhs, tbl ) &&
-			 match_to_impl( a->rhs, b->rhs, tbl ) )
+		if ( match_to_impl( a->lhs, b->lhs, tbl, same_depth ) &&
+			 match_to_impl( a->rhs, b->rhs, tbl, same_depth ) )
 			return true;
 		tbl->resize( prev );
 
@@ -909,13 +901,13 @@ namespace vtil::symbolic
 		// Check in reverse as well and return the final result.
 		//
 		prev = tbl->size();
-		if ( match_to_impl( a->rhs, b->lhs, tbl ) &&
-			 match_to_impl( a->lhs, b->rhs, tbl ) )
+		if ( match_to_impl( a->rhs, b->lhs, tbl, same_depth ) &&
+			 match_to_impl( a->lhs, b->rhs, tbl, same_depth ) )
 			return true;
 		tbl->resize( prev );
 		return false;
 	}
-	std::optional<expression::uid_relation_table> expression::match_to( const expression& other ) const
+	std::optional<expression::uid_relation_table> expression::match_to( const expression& other, bool same_depth ) const
 	{
 		auto a = make_local_reference( this );
 		auto b = make_local_reference( &other );
@@ -932,7 +924,7 @@ namespace vtil::symbolic
 		else
 		{
 			fast_uid_relation_table fast_tbl;
-			if ( match_to_impl( ( expression::reference& )a, ( expression::reference& )b, &fast_tbl ) )
+			if ( match_to_impl( ( expression::reference& )a, ( expression::reference& )b, &fast_tbl, same_depth ) )
 				return expression::uid_relation_table{ fast_tbl.begin(), fast_tbl.end() };
 		}
 		return std::nullopt;

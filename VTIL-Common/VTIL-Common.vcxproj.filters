@@ -76,9 +76,6 @@
     <ClInclude Include="util\fnv64.hpp">
       <Filter>Utility</Filter>
     </ClInclude>
-    <ClInclude Include="util\fnv128.hpp">
-      <Filter>Utility</Filter>
-    </ClInclude>
     <ClInclude Include="util\reducable.hpp">
       <Filter>Utility</Filter>
     </ClInclude>
@@ -173,6 +170,15 @@
       <Filter>Utility</Filter>
     </ClInclude>
     <ClInclude Include="util\relaxed_atomics.hpp">
+      <Filter>Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="io\enum_name.hpp">
+      <Filter>I/O</Filter>
+    </ClInclude>
+    <ClInclude Include="util\vtype_traits.hpp">
+      <Filter>Utility</Filter>
+    </ClInclude>
+    <ClInclude Include="util\function_view.hpp">
       <Filter>Utility</Filter>
     </ClInclude>
   </ItemGroup>

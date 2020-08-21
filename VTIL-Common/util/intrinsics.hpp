@@ -28,6 +28,10 @@
 #pragma once
 #include <stdint.h>
 
+#ifndef __has_builtin
+	#define __has_builtin(x) 0
+#endif
+
 // Determine RTTI support.
 //
 #if defined(_CPPRTTI)
@@ -40,15 +44,24 @@
 	#define HAS_RTTI	0
 #endif
 
+// Determine bitcast support.
+//
+#if (defined(_MSC_VER) && _MSC_VER >= 1926)
+	#define HAS_BIT_CAST 1
+#else
+	#define HAS_BIT_CAST __has_builtin(__builtin_bit_cast)
+#endif
 
 #ifdef _MSC_VER
     #include <intrin.h>
     #define unreachable() __assume(0)
+    #define FUNCTION_NAME __FUNCSIG__
 #else
     #include <emmintrin.h>
     #define unreachable() __builtin_unreachable()
     #define __forceinline __attribute__((always_inline))
     #define _AddressOfReturnAddress() ((void*)__builtin_frame_address(0))
+    #define FUNCTION_NAME __PRETTY_FUNCTION__
 
     // Declare _?mul128
     //

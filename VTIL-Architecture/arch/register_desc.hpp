@@ -116,12 +116,12 @@ namespace vtil
 
 		// Decay to weak identifier.
 		//
-		constexpr weak_id weaken() const { return { flags, combined_id }; }
-		constexpr operator weak_id() const { return weaken(); }
+		weak_id weaken() const { return { flags, combined_id }; }
+		operator weak_id() const { return weaken(); }
 
 		// Flags of the current register, as described in "enum register_flag".
 		//
-		uint32_t flags = 0;
+		register_flag flags = ( register_flag ) 0;
 
 		// Arbitrary identifier, is intentionally not universally unique to let ids of user registers make use
 		// of the full 64-bit range as otherwise we'd have to reserve some magic numbers for flags and stack pointer. 
@@ -156,12 +156,12 @@ namespace vtil
 		// Construct a fully formed register.
 		//
 		constexpr register_desc( weak_id id, bitcnt_t bit_count, bitcnt_t bit_offset = 0 )
-			: flags( id.flags ), combined_id( id.cid ), bit_count( bit_count ), bit_offset( bit_offset )
+			: flags( ( register_flag ) id.flags ), combined_id( id.cid ), bit_count( bit_count ), bit_offset( bit_offset )
 		{
 			is_valid( true );
 		}
 		constexpr register_desc( uint32_t flags, uint64_t id, bitcnt_t bit_count, bitcnt_t bit_offset = 0, uint64_t architecture = 0 )
-			: flags( flags ), local_id( id ), bit_count( bit_count ), bit_offset( bit_offset ), architecture( architecture )
+			: flags( ( register_flag ) flags ), local_id( id ), bit_count( bit_count ), bit_offset( bit_offset ), architecture( architecture )
 		{
 			is_valid( true );
 		}
@@ -262,7 +262,7 @@ namespace vtil
 		//
 		constexpr bool overlaps( const register_desc& o ) const
 		{ 
-			if ( combined_id != o.combined_id || flags != o.flags )
+			if ( local_id != o.local_id || architecture != o.architecture || flags != o.flags )
 				return false;
 			return get_mask() & o.get_mask();
 		}
@@ -271,7 +271,7 @@ namespace vtil
 		//
 		constexpr register_desc select( bitcnt_t new_bit_count, bitcnt_t new_bit_offset ) const
 		{
-			return { weaken(), new_bit_count, new_bit_offset };
+			return { flags, local_id, new_bit_count, new_bit_offset, architecture };
 		}
 		constexpr register_desc rebase( bitcnt_t new_bit_offset ) const
 		{
@@ -327,7 +327,7 @@ namespace vtil
 
 		// Declare reduction.
 		//
-		REDUCE_TO( bit_count, combined_id, flags, bit_offset );
+		REDUCE_TO( bit_count, ( uint64_t(architecture) << 56 ) | local_id, flags, bit_offset );
 	};
 
 	// Should be overriden by the user to describe conversion of the

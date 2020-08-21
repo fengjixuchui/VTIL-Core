@@ -30,6 +30,7 @@
 #include <mutex>
 #include "intrinsics.hpp"
 #include "type_helpers.hpp"
+#include "relaxed_atomics.hpp"
 
 namespace vtil
 {
@@ -38,11 +39,13 @@ namespace vtil
 	template<typename T>
 	struct detached_queue_key
 	{
-		detached_queue_key* prev = nullptr;
+		inline static detached_queue_key* const invalid_value = ( detached_queue_key* ) 0xffffffffffffffff;
+		detached_queue_key* prev = invalid_value;
 		detached_queue_key* next = nullptr;
 
 		T* get( member_reference_t<T, detached_queue_key> ref ) { return ptr_at<T>( this, -make_offset( ref ) ); }
 		const T* get( member_reference_t<T, detached_queue_key> ref ) const { return make_mutable( this )->get( std::move( ref ) ); }
+		bool is_valid() const { return prev != invalid_value; }
 	};
 
 	// Detached in-place queue for tracking already allocated objects 
@@ -57,7 +60,7 @@ namespace vtil
 
 		// Spinlock protecting the list.
 		//
-		mutable std::atomic_flag spinlock = ATOMIC_FLAG_INIT;
+		mutable relaxed_atomic<bool> spinlock = { false };
 
 		// Head, tail and size tracking the list.
 		//
@@ -69,14 +72,8 @@ namespace vtil
 		// lock while processing this information it doesn't make 
 		// sense eitherway.
 		//
-		bool empty() const  
-		{ 
-			return list_size == 0;
-		}
-		size_t size() const 
-		{ 
-			return list_size;
-		}
+		bool empty() const {  return list_size == 0; }
+		size_t size() const { return list_size; }
 
 		// Converts into type with no locks.
 		//
@@ -88,16 +85,14 @@ namespace vtil
 		{
 			if constexpr ( !atomic )
 				return;
-
-			while ( spinlock.test_and_set( std::memory_order_acquire ) )
+			while ( spinlock.exchange( true, std::memory_order_acquire ) != false )
 				_mm_pause();
 		}
 		void unlock() const
 		{
 			if constexpr ( !atomic )
 				return;
-			
-			spinlock.clear( std::memory_order_release );
+			spinlock.store( false, std::memory_order_release );
 		}
 
 		// Inserts the entire queue into the list.
@@ -174,29 +169,21 @@ namespace vtil
 		{
 			std::lock_guard _g( *this );
 
-			if ( head == k ) head = k->next;
-			else if ( k->prev ) k->prev->next = k->next;
+			if ( k->prev ) k->prev->next = k->next;
+			else head = k->next;
 
-			if ( tail == k ) tail = k->prev;
-			else if ( k->next ) k->next->prev = k->prev;
+			if ( k->next ) k->next->prev = k->prev;
+			else tail = k->prev;
 
-			k->prev = nullptr;
-			k->next = nullptr;
-
+			k->prev = key::invalid_value;
 			list_size--;
 		}
-		void erase_if( key* k ) { if ( validate( k ) ) erase( k ); }
-
-		// Checks if the given key is a valid entry to this list.
-		//
-		bool validate( key* k ) const { return k->prev || k->next || head == k || tail == k; }
 
 		// Resets the list.
 		//
 		void reset()
 		{
 			std::lock_guard _g( *this );
-
 			head = nullptr;
 			tail = nullptr;
 			list_size = 0;
@@ -207,13 +194,13 @@ namespace vtil
 		T* front( member_reference_t<T, key> ref )
 		{
 			if ( key* entry = head )
-				return entry->get( std::move( ref ) );
+				return entry->get( ref );
 			return nullptr;
 		}
 		T* back( member_reference_t<T, key> ref )
 		{
 			if ( key* entry = head )
-				return entry->get( std::move( ref ) );
+				return entry->get( ref );
 			return nullptr;
 		}
 		
@@ -225,7 +212,7 @@ namespace vtil
 
 			if ( key* entry = head )
 			{
-				T* value = entry->get( std::move( ref ) );
+				T* value = entry->get( ref );
 				nolock().erase( entry );
 				return value;
 			}
@@ -237,7 +224,7 @@ namespace vtil
 
 			if ( key* entry = tail )
 			{
-				T* value = entry->get( std::move( ref ) );
+				T* value = entry->get( ref );
 				nolock().erase( entry );
 				return value;
 			}

@@ -370,15 +370,14 @@ namespace vtil
 		WRAP_LAZY( tge );    WRAP_LAZY( te );       WRAP_LAZY( tne );    WRAP_LAZY( tle );    
 		WRAP_LAZY( tl );     WRAP_LAZY( tug );      WRAP_LAZY( tuge );   WRAP_LAZY( tule );   
 		WRAP_LAZY( tul );    WRAP_LAZY( js );       WRAP_LAZY( jmp );    WRAP_LAZY( vexit );  
-		WRAP_LAZY( vemit );  WRAP_LAZY( vxcall );   WRAP_LAZY( nop );    WRAP_LAZY( vpinr );  
-		WRAP_LAZY( vpinw );  WRAP_LAZY( vpinrm );   WRAP_LAZY( vpinwm );
+		WRAP_LAZY( vemit );  WRAP_LAZY( vxcall );   WRAP_LAZY( nop );    WRAP_LAZY( sfence );
+		WRAP_LAZY( lfence ); WRAP_LAZY( vpinr );    WRAP_LAZY( vpinw );  WRAP_LAZY( vpinrm );   
+		WRAP_LAZY( vpinwm );
 #undef WRAP_LAZY
 
-		// Memory barriers.
+		// MFENCE => { LFENCE + SFENCE }.
 		//
-		basic_block* vsfence() { return vpinrm( UNDEFINED, 0ull ); }
-		basic_block* vlfence() { return vpinwm( UNDEFINED, 0ull ); }
-		basic_block* vmfence() { return vsfence()->vlfence(); } 
+		basic_block* vmfence() { return lfence()->sfence(); } 
 
 		// Queues a stack shift.
 		//
@@ -474,9 +473,9 @@ namespace vtil
 		// Helper used to drop const-qualifiers of an iterator when we have a mutable 
 		// reference to the block itself.
 		//
-		iterator acquire( const_iterator&& it )             { dassert( it.block == this ); return ( iterator&& ) it; }
-		iterator& acquire( const_iterator& it )             { dassert( it.block == this ); return ( iterator& ) it; }
-		const iterator& acquire( const const_iterator& it ) { dassert( it.block == this ); return ( const iterator& ) it; }
+		iterator acquire( const_iterator&& it )             { dassert( !it.block || it.block == this ); return ( iterator&& ) it; }
+		iterator& acquire( const_iterator& it )             { dassert( !it.block || it.block == this ); return ( iterator& ) it; }
+		const iterator& acquire( const const_iterator& it ) { dassert( !it.block || it.block == this ); return ( const iterator& ) it; }
 	
 	protected:
 		// Wrappers for instruction construction and deconstruction.

@@ -34,6 +34,11 @@
 #include <optional>
 #include "../util/lt_typeid.hpp"
 #include "../util/type_helpers.hpp"
+#include "enum_name.hpp"
+
+#ifdef __GNUG__
+	#include <cxxabi.h>
+#endif
 
 // [Configuration]
 // Determine the way we format the instructions.
@@ -72,20 +77,27 @@ namespace vtil::format
 		//
 		static std::string fix_type_name( std::string in )
 		{
-			static constexpr const char* remove_list[] = {
+#ifdef __GNUG__
+			int status;
+			char* demangled_name = abi::__cxa_demangle( in.data(), nullptr, nullptr, &status );
+			in = demangled_name;
+			free( demangled_name );
+#endif
+			
+			static const std::string remove_list[] = {
 				"struct ",
 				"class ",
 				"enum ",
 				"vtil::"
 			};
-			for ( const char* str : remove_list )
+			for ( auto& str : remove_list )
 			{
 				if ( in.starts_with( str ) )
-					return fix_type_name( in.substr( strlen( str ) ) );
+					return fix_type_name( in.substr( str.length() ) );
 
 				for ( size_t i = 0; i < in.size(); i++ )
 					if ( in[ i ] == '<' && in.substr( i + 1 ).starts_with( str ) )
-						in = in.substr( 0, i + 1 ) + in.substr( i + 1 + strlen( str ) );
+						in = in.substr( 0, i + 1 ) + in.substr( i + 1 + str.length() );
 			}
 			return in;
 		}
@@ -102,7 +114,7 @@ namespace vtil::format
 	static std::string static_type_name()
 	{
 #if HAS_RTTI
-		static std::string res = impl::fix_type_name( typeid( T ).name() );
+		static const std::string res = impl::fix_type_name( typeid( T ).name() );
 		return res;
 #else
 		char buf[ 32 ];
@@ -145,6 +157,10 @@ namespace vtil::format
 		if constexpr ( CustomStringConvertible<T> )
 		{
 			return x.to_string();
+		}
+		else if constexpr ( Enum<T> )
+		{
+			return enum_name<T>::resolve( x );
 		}
 		else if constexpr ( StdStringConvertible<T> )
 		{
@@ -197,6 +213,33 @@ namespace vtil::format
 			if constexpr ( StringConvertible<decltype( x.first )> && StringConvertible<decltype( x.second )> )
 			{
 				return "{" + as_string( x.first ) + ", " + as_string( x.second ) + "}";
+			}
+			else return type_tag<T>{};
+		}
+		else if constexpr ( is_specialization_v<std::tuple, base_type> )
+		{
+			constexpr bool is_tuple_str_cvtable = [ ] ()
+			{
+				bool cvtable = true;
+				if constexpr ( std::tuple_size_v<base_type> > 0 )
+				{
+					make_constant_series<std::tuple_size_v<base_type>>( [ & ] ( auto tag )
+					{
+						if constexpr ( !StringConvertible<std::tuple_element_t<decltype( tag )::value, base_type>> )
+							cvtable = false;
+					} );
+				}
+				return cvtable;
+			}();
+
+			if constexpr ( std::tuple_size_v<base_type> == 0 )
+				return "{}";
+			else if constexpr ( is_tuple_str_cvtable )
+			{
+				std::string res = std::apply( [ ] ( auto&&... args ) {
+					return ( ( as_string( args ) + ", " ) + ... );
+				}, x );
+				return "{" + res.substr(0, res.length() - 2) + "}";
 			}
 			else return type_tag<T>{};
 		}

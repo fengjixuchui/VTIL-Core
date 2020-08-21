@@ -30,6 +30,9 @@
 #include <optional>
 #include <stdint.h>
 #include <array>
+#include <tuple>
+#include <string_view>
+#include <string>
 #include <atomic>
 #include "intrinsics.hpp"
 
@@ -39,6 +42,44 @@ namespace vtil
 	//
 	template<typename T>
 	struct type_tag { using type = T; };
+
+	// Constant tag.
+	//
+	template<auto v>
+	struct const_tag
+	{
+		static constexpr auto value = v;
+
+		template<auto vvvv__identifier__vvvv = v>
+		static constexpr std::string_view name()
+		{
+			std::string_view sig = FUNCTION_NAME;
+			auto [begin, delta, end] = std::tuple{
+#if defined(_MSC_VER)
+				std::string_view{ "<" },                      0,  ">"
+#else
+				std::string_view{ "vvvv__identifier__vvvv" }, +3, "];"
+#endif
+			};
+
+			// Find the beginning of the name.
+			//
+			size_t f = sig.size();
+			while( sig.substr( --f, begin.size() ).compare( begin ) != 0 )
+				if( f == 0 ) return "";
+			f += begin.size() + delta;
+
+			// Find the end of the string.
+			//
+			auto l = sig.find_first_of( end, f );
+			if ( l == std::string::npos )
+				return "";
+
+			// Return the value.
+			//
+			return sig.substr( f, l - f );
+		}
+	};
 	
 	// Check for specialization.
 	//
@@ -54,7 +95,7 @@ namespace vtil
 
 	// Checks if the given lambda can be evaluated in compile time.
 	//
-	template<typename F, std::enable_if_t<F{}(), int> = 0>
+	template<typename F, std::enable_if_t<(F{}(), true), int> = 0>
 	static constexpr bool is_constexpr( F )   { return true; }
 	static constexpr bool is_constexpr( ... ) { return false; }
 
@@ -64,18 +105,36 @@ namespace vtil
 	concept Integral = std::is_integral_v<T>;
 	template<typename T>
 	concept Trivial = std::is_trivial_v<T>;
+	template<typename T>
+	concept Enum = std::is_enum_v<T>;
 
-	template <class From, class To>
-	concept ConvertibleTo = std::is_convertible_v<From, To>;
+	template<typename T>
+	concept TriviallyCopyable = std::is_trivially_copyable_v<T>;
+	template<typename From, typename To>
+	concept TriviallyAssignable = std::is_trivially_assignable_v<From, To>;
+	template<typename T>
+	concept TriviallyConstructable = std::is_trivially_constructible_v<T>;
+	template<typename T>
+	concept TriviallyDefaultConstructable = std::is_trivially_default_constructible_v<T>;
+	template<typename T>
+	concept TriviallyDestructable = std::is_trivially_destructible_v<T>;
+
+	template<typename A, typename B>
+	concept Same = std::is_same_v<A, B>;
+	template <typename From, typename To>
+	concept Convertible = std::is_convertible_v<From, To>;
 	template<typename T, typename... Args>
 	concept Constructable = requires { T( std::declval<Args>()... ); };
 	template<typename T, typename X>
 	concept Assignable = requires( T r, X v ) { r = v; };
 
+	template<typename T, typename Ret, typename... Args>
+	concept Invocable = requires( T&& x, Args&&... args ) { Convertible<decltype( x( std::forward<Args>( args )... ) ), Ret>; };
+
 	template<typename T>
 	concept Iterable = requires( T v ) { std::begin( v ); std::end( v ); };
 	template<typename V, typename T>
-	concept TypedIterable = Iterable<T> && requires( T v ) { ConvertibleTo<decltype( *std::begin( v ) ), V&>; };
+	concept TypedIterable = Iterable<T> && requires( T v ) { Convertible<decltype( *std::begin( v ) ), V&>; };
 
 	template<typename T>
 	concept DefaultRandomAccessible = requires( T v ) { make_const( v )[ 0 ]; std::size( v ); };
@@ -190,6 +249,13 @@ namespace vtil
 	template<typename C, typename M>
 	using member_reference_t = M C::*;
 
+	// Function pointer helpers.
+	//
+	template<typename C, typename R, typename... A>
+	using static_function_t = R(*)(A...);
+	template<typename C, typename R, typename... A>
+	using member_function_t = R(C::*)(A...);
+
 	// Implement helpers for basic series creation.
 	//
 	namespace impl
@@ -197,13 +263,28 @@ namespace vtil
 		template<typename Ti, typename T, Ti... I>
 		static constexpr auto make_expanded_series( T&& f, std::integer_sequence<Ti, I...> )
 		{
-			return std::array{ f( I )... };
+			if constexpr ( std::is_void_v<decltype( f( (Ti)0 ) )> )
+				( ( f( I ) ), ... );
+			else
+				return std::array{ f( I )... };
 		}
 
 		template<typename Ti, template<auto> typename Tr, typename T, Ti... I>
 		static constexpr auto make_visitor_series( T&& f, std::integer_sequence<Ti, I...> )
 		{
-			return std::array{ f( type_tag<Tr<I>>{} )... };
+			if constexpr ( std::is_void_v<decltype( f( type_tag<Tr<(Ti)0>>{} ) )> )
+				( ( f( type_tag<Tr<I>>{} ) ), ... );
+			else
+				return std::array{ f( type_tag<Tr<I>>{} )... };
+		}
+
+		template<typename Ti, typename T, Ti... I>
+		static constexpr auto make_constant_series( T&& f, std::integer_sequence<Ti, I...> )
+		{
+			if constexpr ( std::is_void_v<decltype( f( const_tag<(Ti)0>{} ) )> )
+				( ( f( const_tag<I>{} ) ), ... );
+			else
+				return std::array{ f( const_tag<I>{} )... };
 		}
 	};
 	template<auto N, typename T>
@@ -215,6 +296,11 @@ namespace vtil
 	static constexpr auto make_visitor_series( T&& f )
 	{
 		return impl::make_visitor_series<decltype( N ), Tr, T>( std::forward<T>( f ), std::make_integer_sequence<decltype( N ), N>{} );
+	}
+	template<auto N, typename T>
+	static constexpr auto make_constant_series( T&& f )
+	{
+		return impl::make_constant_series<decltype( N )>( std::forward<T>( f ), std::make_integer_sequence<decltype( N ), N>{} );
 	}
 
 	// Resets the value of the object referenced.
@@ -258,7 +344,7 @@ namespace vtil
 	// move constructor does not exist, e.g. a trivial type, will assign default value after moving from it.
 	//
 	template<typename T>
-	[[nodiscard]] static constexpr decltype(auto) possess_value( T& v )
+	[[nodiscard]] static constexpr T possess_value( T& v )
 	{
 		// If trivial type, use exchange (likely to generate single XCHG).
 		//
@@ -269,21 +355,15 @@ namespace vtil
 		// If trivially move constructable, std::move will not invalidate the target so invoke 
 		// move and invalidate manually here.
 		//
-		else if constexpr ( std::is_trivially_move_constructible_v<T> )
+		else if constexpr ( std::is_move_constructible_v<T> && Nullable<T> )
 		{
 			T value{ std::move( v ) };
 			null_value( v );
 			return value;
 		}
-		// If it has a user-defined move constructor, redirect to move.
-		//
-		else if constexpr ( std::is_move_constructible_v<T> )
-		{
-			return std::move( v );
-		}
 		// If there is a copy constructor, copy it and then reset.
 		//
-		else if constexpr ( std::is_copy_constructible_v<T> )
+		else if constexpr ( std::is_copy_constructible_v<T> && Nullable<T> )
 		{
 			T value{ v };
 			null_value( v );
@@ -317,5 +397,28 @@ namespace vtil
 			return o[ N ];
 		else if constexpr ( Iterable<T> )
 			return *std::next( std::begin( o ), N );
+	}
+
+	// Bitcasting.
+	//
+	template<TriviallyCopyable To, TriviallyCopyable From> 
+	requires( sizeof( To ) == sizeof( From ) )
+	static constexpr To bit_cast( const From& src ) noexcept
+	{
+#if HAS_BIT_CAST
+		return __builtin_bit_cast( To, src );
+#else
+		if ( !std::is_constant_evaluated() )
+			return ( const To& ) src;
+#endif
+		unreachable();
+	}
+	template<typename T>
+	concept Bitcastable = requires( T x ) { bit_cast<std::array<char, sizeof( T )>, T >( x ); };
+
+	template<typename T>
+	static auto& as_bytes( T& src )
+	{
+		return carry_const( src, ( std::array<char, sizeof( T )>& ) src );
 	}
 };
