@@ -26,63 +26,56 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <vtil/arch>
-#include "../common/interface.hpp"
+#include <iterator>
+#include <vector>
+#include "task.hpp"
+#include "type_helpers.hpp"
+#include "intrinsics.hpp"
 
-namespace vtil::optimizer
+// [Configuration]
+// Determine whether or not to use parallel transformations.
+//
+#ifndef VTIL_USE_PARALLEL_TRANSFORM
+	#define VTIL_USE_PARALLEL_TRANSFORM true
+#endif
+
+namespace vtil
 {
-	struct register_id
+	namespace impl
 	{
-		uint64_t combined_id;
-		uint64_t flags;
-
-		bool operator==( const register_id &other ) const
+		template<typename T>
+		__forceinline static decltype( auto ) ref_adjust( T&& x )
 		{
-			return other.combined_id == combined_id && other.flags == flags;
-		}
-
-		bool operator!=( const register_id &other ) const
-		{
-			return other.combined_id != combined_id || other.flags != flags;
-		}
-
-		explicit register_id( vtil::register_desc reg ) : combined_id( reg.combined_id ), flags( reg.flags )
-		{}
-	};
-}
-
-namespace std
-{
-	template<>
-	struct hash<vtil::optimizer::register_id>
-	{
-		size_t operator()( const vtil::optimizer::register_id& id ) const
-		{
-			return (id.flags << 32u) | id.combined_id;
+			if constexpr ( std::is_reference_v<T> )
+				return std::ref( x );
+			else
+				return x;
 		}
 	};
-}
 
-namespace vtil::optimizer
-{
-	// Removes every non-volatile instruction whose effects are
-	// ignored or overwritten.
+	// Generic parallel worker helper.
 	//
-	struct fast_dead_code_elimination_pass : pass_interface<execution_order::custom>
+	template<Iterable C, typename F> requires Invocable<F, void, iterator_reference_type_t<C>>
+	static void transform_parallel( C&& container, const F& worker )
 	{
-		std::unordered_set< basic_block* > sealed;
-		std::unordered_map< basic_block*, std::unordered_map< register_id, uint64_t > > reg_map;
+		size_t container_size = std::size( container );
 
-		size_t fast_xblock_dce( basic_block* blk );
-		size_t pass( basic_block* blk, bool xblock = false ) { return 0; }
-		size_t xpass( routine* rtn ) override
+		// If parallel transformation is disabled or if the container only has one entry, 
+		// fallback to serial transformation.
+		//
+		if ( !VTIL_USE_PARALLEL_TRANSFORM || container_size == 1 )
 		{
-			return fast_xblock_dce( rtn->entry_point );
+			for ( auto it = std::begin( container ); it != std::end( container ); ++it )
+				return worker( *it );
 		}
-	};
-
-	struct fast_local_dead_code_elimination_pass : pass_interface<>
-	{
-		size_t pass( basic_block* blk, bool xblock = false ) override;
-	};
+		// Otherwise, create task pool and insert for each entry.
+		//
+		else
+		{
+			std::vector<task::instance> tasks;
+			tasks.reserve( container_size );
+			for ( auto it = std::begin( container ); it != std::end( container ); ++it )
+				tasks.emplace_back( [ &worker, value = impl::ref_adjust( *it ) ] () {  worker( value );  } );
+		}
+	}
 };

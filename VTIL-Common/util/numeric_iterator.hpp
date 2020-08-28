@@ -43,10 +43,10 @@ namespace vtil
 			// Generic iterator typedefs.
 			//
 			using iterator_category = std::bidirectional_iterator_tag;
-			using value_type = T;
-			using difference_type =   size_t;
-			using pointer =           value_type*;
-			using reference =         value_type&;
+			using difference_type =   std::make_signed_t<T>;
+			using value_type =        T;
+			using pointer =           T*;
+			using reference =         T&;
 
 			// Range of iteration.
 			//
@@ -55,34 +55,36 @@ namespace vtil
 
 			// Default constructor.
 			//
-			iterator( value_type at, value_type limit = 0 ) :
+			constexpr iterator( value_type at, value_type limit = 0 ) :
 				at( at ), limit( limit ) {}
 
 			// Support bidirectional iteration.
 			//
-			iterator& operator++() { at++; return *this; }
-			iterator& operator--() { at--; return *this; }
+			constexpr iterator& operator++() { at++; return *this; }
+			constexpr iterator& operator--() { at--; return *this; }
+			constexpr iterator operator++( int ) { auto s = *this; operator++(); return s; }
+			constexpr iterator operator--( int ) { auto s = *this; operator--(); return s; }
 
 			// Equality check against another iterator.
 			//
-			bool operator==( const iterator& other ) const 
+			constexpr bool operator==( const iterator& other ) const
 			{ 
 				return at == other.at && limit == other.limit;
 			}
-			bool operator!=( const iterator& other ) const 
+			constexpr bool operator!=( const iterator& other ) const
 			{ 
 				return at != other.at || limit != other.limit;
 			}
 			
 			// Equality check against special end iterator.
 			//
-			bool operator==( iterator_end_tag_t ) const { return at == limit; }
-			bool operator!=( iterator_end_tag_t ) const { return at != limit; }
+			constexpr bool operator==( iterator_end_tag_t ) const { return at == limit; }
+			constexpr bool operator!=( iterator_end_tag_t ) const { return at != limit; }
 
 			// Redirect dereferencing to container.
 			//
-			value_type operator*() { return at; }
-			value_type operator*() const { return at; }
+			constexpr value_type operator*() { return at; }
+			constexpr value_type operator*() const { return at; }
 		};
 		using const_iterator = iterator;
 

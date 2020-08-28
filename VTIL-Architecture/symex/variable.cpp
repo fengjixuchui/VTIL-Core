@@ -113,8 +113,8 @@ namespace vtil::symbolic
 
 							// Determine all paths and path restrict the iterator.
 							//
-							auto& pathset_1 = o1->owner->get_path_bwd( var.at.block, o1 );
-							auto& pathset_2 = o1->owner->get_path_bwd( var.at.block, o2 );
+							auto& pathset_1 = o1->owner->get_path( o1, var.at.block );
+							auto& pathset_2 = o1->owner->get_path( o2, var.at.block );
 							var.at.is_path_restricted = true;
 
 							// If only one of the paths are valid for backwards iteration:
@@ -180,6 +180,8 @@ namespace vtil::symbolic
 	//
 	static access_details test_access( const variable& var, const il_const_iterator& it, tracer* tracer, bool cwrite, bool cread, bool xblock )
 	{
+		access_details result = {};
+
 		// If variable is of register type:
 		//
 		if ( auto reg = std::get_if<variable::register_t>( &var.descriptor ) )
@@ -206,12 +208,12 @@ namespace vtil::symbolic
 				if ( !ref_reg.overlaps( *reg ) )
 					continue;
 
-				// Return access details.
+				// Append access details.
 				//
-				return {
+				result += {
 					.bit_offset = ref_reg.bit_offset - reg->bit_offset,
 					.bit_count = ref_reg.bit_count,
-					.read = it->base->operand_types[ i ] != operand_type::write,
+					.read =  it->base->operand_types[ i ] != operand_type::write,
 					.write = it->base->operand_types[ i ] >= operand_type::write
 				};
 			}
@@ -253,16 +255,20 @@ namespace vtil::symbolic
 					// If offset is unknown, return as is.
 					//
 					if ( details.is_unknown() )
-						return details;
-
-					// Check if within boundaries, set bit count and return if so.
-					//
-					bitcnt_t low_offset = details.bit_offset;
-					bitcnt_t high_offset = low_offset + it->access_size();
-					if ( low_offset < mem->bit_count && high_offset > 0 )
 					{
-						details.bit_count = it->access_size();
-						return details;
+						result += details;
+					}
+					else
+					{
+						// Check if within boundaries, set bit count and return if so.
+						//
+						bitcnt_t low_offset = details.bit_offset;
+						bitcnt_t high_offset = low_offset + it->access_size();
+						if ( low_offset < mem->bit_count && high_offset > 0 )
+						{
+							details.bit_count = it->access_size();
+							result += details;
+						}
 					}
 				}
 			}
@@ -284,121 +290,85 @@ namespace vtil::symbolic
 
 				// If $sp, indicate read from:
 				//
-				if ( reg.is_stack_pointer() )
-				{
-					if ( !cread ) return {};
-					return {
-							.bit_offset = 0,
-							.bit_count = reg.bit_count,
-							.read = true,
-							.write = false
-					};
-				}
+				if ( cread && reg.is_stack_pointer() )
+					result += { .bit_offset = 0, .bit_count = reg.bit_count, .read = true, .write = false };
 
 				// If exiting the virtual machine:
 				//
 				if ( it->base == &ins::vexit )
 				{
-					// If retval register, indicate read from:
+					// If virtual register, indicate discarded:
 					//
-					if ( cread )
+					if ( reg.is_virtual() )
 					{
-						for ( const register_desc& retval : it.block->owner->routine_convention.retval_registers )
+						if ( cwrite )
+							result += { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
+					}
+					// If physical register:
+					//
+					else
+					{
+						uint64_t volatile_mask = 0;
+
+						// If volatile register, indicate discarded:
+						//
+						for ( const register_desc& volreg : cc.volatile_registers )
 						{
-							if ( retval.overlaps( reg ) )
+							if ( volreg.overlaps( reg ) )
 							{
-								return {
-									.bit_offset = retval.bit_offset - reg.bit_offset,
-									.bit_count = retval.bit_count,
-									.read = true, 
-									.write = false
-								};
+								volatile_mask |= volreg.get_mask();
+								if ( cwrite )
+									result += {.bit_offset = volreg.bit_offset - reg.bit_offset, .bit_count = volreg.bit_count, .read = false, .write = true };
+							}
+						}
+
+						if ( cread )
+						{
+							// If volatile, indicate read from if retval:
+							//
+							if ( ( reg.get_mask() & volatile_mask ) == reg.get_mask() )
+							{
+								for ( const register_desc& retval : cc.retval_registers )
+									if ( retval.overlaps( reg ) )
+										result += {.bit_offset = retval.bit_offset - reg.bit_offset, .bit_count = retval.bit_count, .read = true, .write = false };
+							}
+							// Otherwise directly indicate read from:
+							//
+							else
+							{
+								result += {.bit_offset = 0, .bit_count = reg.bit_count, .read = true, .write = false };
 							}
 						}
 					}
-
-					// If volatile register, indicate discarded:
-					//
+				}
+				// If invoking external routine:
+				//
+				else
+				{
 					if ( cwrite )
 					{
-						for ( const register_desc& retval : it.block->owner->routine_convention.volatile_registers )
+						// If volatile register, indicate discarded:
+						//
+						for ( const register_desc& param : cc.volatile_registers )
+							if ( param.overlaps( reg ) )
+								result += {.bit_offset = param.bit_offset - reg.bit_offset, .bit_count = param.bit_count, .read = false, .write = true };
+
+						// If retval register, indicate discarded:
+						//
+						for ( const register_desc& retval : cc.retval_registers )
 							if ( retval.overlaps( reg ) )
-								return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
+								result += {.bit_offset = retval.bit_offset - reg.bit_offset, .bit_count = retval.bit_count, .read = false, .write = true };
 					}
 
-					// If virtual register, indicate discarded:
-					//
-					if ( cwrite )
+					if ( cread )
 					{
-						if ( reg.is_virtual() )
-							return { .bit_offset = 0, .bit_count = reg.bit_count, .read = false, .write = true };
-					}
-
-					// Otherwise indicate read from.
-					//
-					if ( !cread ) return {};
-					return {
-						.bit_offset = 0,
-						.bit_count = reg.bit_count,
-						.read = true,
-						.write = false
-					};
-				}
-
-				// If not only looking for read access, check if register is written to.
-				//
-				access_details wdetails = {};
-				if ( cwrite )
-				{
-					for ( const register_desc& param : cc.volatile_registers )
-					{
-						if ( param.overlaps( reg ) )
-						{
-							wdetails.bit_offset = param.bit_offset - reg.bit_offset;
-							wdetails.bit_count = param.bit_count;
-							wdetails.write = true;
-							break;
-						}
-					}
-					for ( const register_desc& retval : cc.retval_registers )
-					{
-						if ( retval.overlaps( reg ) )
-						{
-							wdetails.bit_offset = retval.bit_offset - reg.bit_offset;
-							wdetails.bit_count = retval.bit_count;
-							wdetails.write = true;
-							break;
-						}
+						// If parameter register, indicate read from.
+						//
+						for ( const register_desc& param : cc.param_registers )
+							if ( param.overlaps( reg ) )
+								result += {.bit_offset = param.bit_offset - reg.bit_offset, .bit_count = param.bit_count, .read = true, .write = false };
 					}
 				}
-
-				// If not only looking for write access, check if register is read from.
-				//
-				access_details rdetails = {};
-				if ( cread )
-				{
-					for ( const register_desc& param : cc.param_registers )
-					{
-						if ( param.overlaps( reg ) )
-						{
-							rdetails.bit_offset = param.bit_offset - reg.bit_offset;
-							rdetails.bit_count = param.bit_count;
-							rdetails.read = true;
-							break;
-						}
-					}
-				}
-
-				// Merge rdetails and wdetails, return.
-				//
-				if ( !wdetails ) return rdetails;
-				if ( !rdetails ) return wdetails;
-				return {
-					.bit_offset = std::min( wdetails.bit_offset, rdetails.bit_offset ),
-					.bit_count = std::max( wdetails.bit_count, rdetails.bit_count ),
-					.read = true,
-					.write = true
-				};
 			}
 			// If variable is memory:
 			//
@@ -424,7 +394,7 @@ namespace vtil::symbolic
 						access_details details;
 						fill_displacement( &details, mem.base, pointer{ std::move( limit ) }, tracer, xblock );
 						if ( !details.is_unknown() && ( details.bit_offset + var.bit_count() ) <= 0 )
-							return { .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
+							result += { .bit_offset = 0, .bit_count = var.bit_count(), .read = false, .write = true };
 					}
 				}
 
@@ -435,9 +405,9 @@ namespace vtil::symbolic
 			}
 		}
 
-		// No access case.
+		// Return result.
 		//
-		return {};
+		return result;
 	}
 
 	// Constructs by iterator and the variable descriptor itself.

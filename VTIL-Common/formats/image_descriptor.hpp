@@ -31,6 +31,7 @@
 #include <optional>
 #include "../util/zip.hpp"
 #include "../util/numeric_iterator.hpp"
+#include "../util/function_view.hpp"
 
 namespace vtil
 {
@@ -52,16 +53,23 @@ namespace vtil
 		// Relative virtual address of the section and the lenght of the data at runtime.
 		//
 		uint64_t virtual_address = 0;
-		size_t  virtual_size = 0;
+		size_t virtual_size = 0;
 
 		// Physical address of the section and the length of the data on disk.
 		//
 		uint64_t physical_address = 0;
-		size_t  physical_size = 0;
+		size_t physical_size = 0;
 	
 		// Cast to bool redirects to ::valid.
 		//
 		explicit operator bool() const { return valid; }
+
+		// Checks if RVA is within this section.
+		//
+		bool contains( uint64_t rva, size_t n = 1 ) const
+		{
+			return virtual_address <= rva && ( rva + n ) <= ( virtual_address + virtual_size );
+		}
 
 		// Translates relative virtual address to physical address.
 		//
@@ -77,6 +85,15 @@ namespace vtil
 		}
 	};
 
+	// Generic relocation information.
+	//
+	struct relocation_descriptor
+	{
+		uint64_t rva;
+		size_t length;
+		void( *relocator )( void* data, int64_t delta );
+	};
+
 	// Generic image interface.
 	//
 	struct image_descriptor
@@ -89,10 +106,10 @@ namespace vtil
 			// Generic iterator typedefs.
 			//
 			using iterator_category = std::bidirectional_iterator_tag;
-			using difference_type =   size_t;
+			using difference_type =   int64_t;
+			using reference =         section_descriptor;
 			using value_type =        section_descriptor;
-			using pointer =           section_descriptor*;
-			using reference =         section_descriptor&;
+			using pointer =           void*;
 
 			// Range of iteration and a reference to the original binary.
 			//
@@ -152,9 +169,9 @@ namespace vtil
 		//
 		virtual void add_section( section_descriptor& in_out, const void* data, size_t size ) = 0;
 
-		// Returns whether the address provided will be relocated or not.
+		// Invokes the enumerator for each relocation entry in the binary, breaks if enumerator returns true.
 		//
-		virtual bool is_relocated( uint64_t rva ) const = 0;
+		virtual void enum_relocations( const function_view<bool( const relocation_descriptor& )>& fn ) const = 0;
 
 		// Returns the image base.
 		//
@@ -209,6 +226,27 @@ namespace vtil
 		section_iterator begin() const { return { this, 0 }; }
 		section_iterator_end_tag_t end() const { return {}; }
 		section_descriptor operator[]( size_t n ) const { return get_section( n ); }
+
+		// Returns whether the address provided will be relocated or not.
+		//
+		bool is_relocated( uint64_t rva ) const
+		{
+			bool found = false;
+			enum_relocations( [ & ] ( const relocation_descriptor& e )
+			{
+				return ( found = ( e.rva <= rva && rva < ( e.rva + e.length ) ) );
+			} );
+			return found;
+		}
+
+		// Returns a list of all relocation entries.
+		//
+		std::vector<relocation_descriptor> get_relocations() const
+		{
+			std::vector<relocation_descriptor> entries;
+			enum_relocations( [ & ] ( const relocation_descriptor& e ) { entries.emplace_back( e ); return false; } );
+			return entries;
+		}
 
 		// Cast to bool redirects to ::is_valid.
 		//

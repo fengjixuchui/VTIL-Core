@@ -41,10 +41,10 @@
 	#define	VTIL_SYMEX_SELFGEN_SIGMATCH_DEPTH_LIM   3
 #endif
 #ifndef VTIL_SYMEX_LRU_CACHE_SIZE
-	#define VTIL_SYMEX_LRU_CACHE_SIZE               0x40000
+	#define VTIL_SYMEX_LRU_CACHE_SIZE               0x10000
 #endif
 #ifndef VTIL_SYMEX_LRU_PRUNE_COEFF
-	#define VTIL_SYMEX_LRU_PRUNE_COEFF              0.5
+	#define VTIL_SYMEX_LRU_PRUNE_COEFF              0.35
 #endif
 namespace vtil::symbolic
 {
@@ -96,7 +96,6 @@ namespace vtil::symbolic
 			// Type of the queue key.
 			//
 			using queue_key = typename detached_queue<cache_value>::key;
-
 
 			// Entry itself:
 			//
@@ -211,6 +210,14 @@ namespace vtil::symbolic
 		// Cache map.
 		//
 		cache_map map{ max_cache_entries };
+
+		// Disallow copy.
+		//
+		simplifier_state() {}
+		simplifier_state( simplifier_state&& ) = default;
+		simplifier_state( const simplifier_state& ) = delete;
+		simplifier_state& operator=( simplifier_state&& ) = default;
+		simplifier_state& operator=( const simplifier_state& ) = delete;
 
 		// Resets the local cache.
 		//
@@ -345,6 +352,10 @@ namespace vtil::symbolic
 			auto [it, inserted] = map.emplace( exp, make_default<cache_value>() );
 			cache_scanner::sigscan = nullptr;
 
+			// Speculatively lock the entry.
+			//
+			it->second.lock_count++;
+
 			// If we inserted a new entry:
 			//
 			if ( inserted )
@@ -406,16 +417,36 @@ namespace vtil::symbolic
 				lru_queue.erase( &it->second.lru_key );
 			}
 
+			// Remove speculative lock.
+			//
+			it->second.lock_count--;
+
 			// Insert into the tail of use list.
 			//
 			lru_queue.emplace_back( &it->second.lru_key );
 			return { it->second.result, it->second.is_simplified, !inserted, &it->second };
 		}
 	};
-	static thread_local simplifier_state_ptr local_state = simplifier_state_allocator{}();
-	void purge_simplifier_state() { local_state->reset(); }
-	simplifier_state_ptr swap_simplifier_state( simplifier_state_ptr p ) { return std::exchange( local_state, p ? std::move( p ) : simplifier_state_allocator{}( ) ); }
 
+	static task_local( simplifier_state ) local_state;
+	void purge_simplifier_state() { if( local_state.init ) local_state->reset(); }
+
+	simplifier_state_ptr swap_simplifier_state( simplifier_state_ptr p ) 
+	{ 
+		if ( p )
+		{
+			std::swap( *p, *local_state );
+			return p;
+		}
+		else if( local_state.init )
+		{
+			return { new simplifier_state( local_state.steal() ), simplifier_state_deleter{} };
+		}
+		else
+		{
+			return nullptr;
+		}
+	}
 	void simplifier_state_deleter::operator()( simplifier_state* p ) const noexcept { delete p; }
 	simplifier_state_ptr simplifier_state_allocator::operator()() const noexcept    { return { new simplifier_state, simplifier_state_deleter{} }; }
 

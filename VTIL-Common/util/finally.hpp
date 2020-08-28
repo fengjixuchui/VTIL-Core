@@ -26,63 +26,16 @@
 // POSSIBILITY OF SUCH DAMAGE.        
 //
 #pragma once
-#include <vtil/arch>
-#include "../common/interface.hpp"
+#include "type_helpers.hpp"
 
-namespace vtil::optimizer
+namespace vtil
 {
-	struct register_id
+	template<typename T> requires Invocable<T, void>
+	struct finally
 	{
-		uint64_t combined_id;
-		uint64_t flags;
-
-		bool operator==( const register_id &other ) const
-		{
-			return other.combined_id == combined_id && other.flags == flags;
-		}
-
-		bool operator!=( const register_id &other ) const
-		{
-			return other.combined_id != combined_id || other.flags != flags;
-		}
-
-		explicit register_id( vtil::register_desc reg ) : combined_id( reg.combined_id ), flags( reg.flags )
-		{}
-	};
-}
-
-namespace std
-{
-	template<>
-	struct hash<vtil::optimizer::register_id>
-	{
-		size_t operator()( const vtil::optimizer::register_id& id ) const
-		{
-			return (id.flags << 32u) | id.combined_id;
-		}
-	};
-}
-
-namespace vtil::optimizer
-{
-	// Removes every non-volatile instruction whose effects are
-	// ignored or overwritten.
-	//
-	struct fast_dead_code_elimination_pass : pass_interface<execution_order::custom>
-	{
-		std::unordered_set< basic_block* > sealed;
-		std::unordered_map< basic_block*, std::unordered_map< register_id, uint64_t > > reg_map;
-
-		size_t fast_xblock_dce( basic_block* blk );
-		size_t pass( basic_block* blk, bool xblock = false ) { return 0; }
-		size_t xpass( routine* rtn ) override
-		{
-			return fast_xblock_dce( rtn->entry_point );
-		}
-	};
-
-	struct fast_local_dead_code_elimination_pass : pass_interface<>
-	{
-		size_t pass( basic_block* blk, bool xblock = false ) override;
+		T functor;
+		finally( T&& fn ) : functor( std::forward<T>( fn ) ) {}
+		finally( const finally& ) = delete;
+		~finally() { functor(); }
 	};
 };
