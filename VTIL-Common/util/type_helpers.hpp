@@ -156,9 +156,9 @@ namespace vtil
 	// Functor traits.
 	//
 	template<typename T, typename Ret, typename... Args>
-	concept Invocable = requires( T&& x, Args&&... args ) { Convertible<decltype( x( std::forward<Args>( args )... ) ), Ret>; };
+	concept Invocable = requires( T&& x ) { Convertible<decltype( x( std::declval<Args>()... ) ), Ret>; };
 	template<typename T, typename... Args>
-	concept InvocableWith = requires( T&& x, Args&&... args ) { x( std::forward<Args>( args )... ); };
+	concept InvocableWith = requires( T&& x ) { x( std::declval<Args>()... ); };
 
 	// Container traits.
 	//
@@ -173,7 +173,7 @@ namespace vtil
 	using iterator_value_type_t = typename std::remove_cvref_t<iterator_reference_type_t<T>>;
 
 	template<typename V, typename T>
-	concept TypedIterable = Iterable<T> && Same<iterator_value_type_t<T>, V>;
+	concept TypedIterable = Iterable<T> && Same<std::decay_t<iterator_value_type_t<T>>, std::decay_t<V>>;
 
 	template<typename T>
 	concept DefaultRandomAccessible = requires( T v ) { make_const( v )[ 0 ]; std::size( v ); };
@@ -185,16 +185,16 @@ namespace vtil
 	// String traits.
 	//
 	template<typename T>
-	concept CppStringView = is_specialization_v<std::basic_string_view, T>;
+	concept CppStringView = is_specialization_v<std::basic_string_view, std::decay_t<T>>;
 	template<typename T>
-	concept CppString = is_specialization_v<std::basic_string, T>;
+	concept CppString = is_specialization_v<std::basic_string, std::decay_t<T>>;
 	template<typename T>
-	concept CString = std::is_pointer_v<T> &&
-		( std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char> ||
-		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, wchar_t> ||
-		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char8_t> ||
-		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char16_t> ||
-		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<T>>, char32_t> );
+	concept CString = std::is_pointer_v<std::decay_t<T>> &&
+		( std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char> ||
+		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, wchar_t> ||
+		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char8_t> ||
+		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char16_t> ||
+		  std::is_same_v<std::remove_cv_t<std::remove_pointer_t<std::decay_t<T>>>, char32_t> );
 
 	template<typename T>
 	concept String = CppString<T> || CString<T> || CppStringView<T>;

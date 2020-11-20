@@ -508,6 +508,18 @@ namespace vtil
 
 	// Helpers used to declare the functions.
 	//
+	template<typename S, typename T>
+	static decltype( auto ) visit_nt( S* self, T&& fn )
+	{
+		auto dos_header = ( dos_header_t* ) self->cdata();
+		auto* nt_hdrs = dos_header->get_nt_headers<true>();
+
+		if( nt_hdrs->optional_header.magic == OPT_HDR64_MAGIC )
+			return fn( carry_const( self, ( nt_headers_x64_t* ) nt_hdrs ) );
+		else
+			return fn( carry_const( self, ( nt_headers_x86_t* ) nt_hdrs ) );
+	}
+
 	bool pe_image::is_pe64() const
 	{
 		auto dos_header = ( const dos_header_t* ) cdata();
@@ -515,15 +527,12 @@ namespace vtil
 	}
 	uint64_t pe_image::get_alignment_mask() const
 	{
-		auto dos_header = ( const dos_header_t* ) cdata();
-		auto sec_alignment = is_pe64()
-			? dos_header->get_nt_headers<true>()->optional_header.section_alignment
-			: dos_header->get_nt_headers<false>()->optional_header.section_alignment;
-		auto file_alignment = is_pe64()
-			? dos_header->get_nt_headers<true>()->optional_header.file_alignment
-			: dos_header->get_nt_headers<false>()->optional_header.file_alignment;
-
-		return std::max( { file_alignment, file_alignment, 0x1000u } ) - 1;
+		// Return maximum alignment required or PAGE_SIZE.
+		//
+		return visit_nt( this, [ ] ( auto* nt ) -> uint64_t
+		{ 
+			return std::max( { nt->optional_header.section_alignment, nt->optional_header.file_alignment, 0x1000u } ) - 1;
+		} );
 	}
 
 	// Implement the interface requirements:
@@ -552,7 +561,7 @@ namespace vtil
 		//
 		auto scn_header = nt_headers->get_section( index );
 		return {
-			.name = { scn_header->name, scn_header->name + ( scn_header->name[ LEN_SECTION_NAME - 1 ] ? LEN_SECTION_NAME : strlen( scn_header->name ) ) },
+			.name = { scn_header->name,  scn_header->name[ LEN_SECTION_NAME - 1 ] ? LEN_SECTION_NAME : strlen( scn_header->name ) },
 			.valid = true,
 			.read = ( bool ) scn_header->characteristics.mem_read,
 			.write = ( bool ) scn_header->characteristics.mem_write,
@@ -583,47 +592,66 @@ namespace vtil
 
 	uint64_t pe_image::next_free_rva() const
 	{
-		// Get the NT headers.
-		//
-		auto dos_header = ( const dos_header_t* ) cdata();
-		auto nt_headers = dos_header->get_nt_headers<true>();
-
-		// Iterate each section:
-		//
-		uint32_t rva_high = 0;
-		uint32_t raw_low = 0;
-		for ( size_t i = 0; i < nt_headers->file_header.num_sections; i++ )
+		return visit_nt( this, [ & ] ( auto nt_headers ) -> uint64_t
 		{
-			// Reference section and calculate min-maxes.
+			// Iterate each section:
 			//
-			auto scn = nt_headers->get_section( i );
-			rva_high = std::max( scn->virtual_address + std::max( scn->virtual_size, scn->size_raw_data ), rva_high );
-			raw_low = std::max( scn->ptr_raw_data, raw_low );
-		}
+			uint32_t rva_high = 0;
+			uint32_t raw_low = 0;
+			for ( size_t i = 0; i < nt_headers->file_header.num_sections; i++ )
+			{
+				// Reference section and calculate min-maxes.
+				//
+				auto scn = nt_headers->get_section( i );
+				rva_high = std::max( scn->virtual_address + std::max( scn->virtual_size, scn->size_raw_data ), rva_high );
+				raw_low = std::max( scn->ptr_raw_data, raw_low );
+			}
 
-		// Make sure there is space for another section.
-		//
-		uint32_t size_headers = is_pe64()
-			? dos_header->get_nt_headers<true>()->optional_header.size_headers
-			: dos_header->get_nt_headers<false>()->optional_header.size_headers;
-		if ( raw_low <= ( sizeof( section_header_t ) + size_headers ) )
-			return 0;
+			// Make sure there is space for another section.
+			//
+			uint32_t size_headers = nt_headers->optional_header.size_headers;
+			if ( raw_low <= ( sizeof( section_header_t ) + size_headers ) )
+				return 0ull;
 
-		// Page align rva high and calculate where we place the next section.
-		//
-		uint64_t alignment = get_alignment_mask();
-		return ( rva_high + alignment ) & ~alignment;
+			// Page align rva high and calculate where we place the next section.
+			//
+			uint64_t alignment = get_alignment_mask();
+			return ( rva_high + alignment ) & ~alignment;
+		} );
 	}
 
 	uint64_t pe_image::get_image_base() const
 	{
 		// Get the image base from optional header.
 		//
-		auto dos_header = ( const dos_header_t* ) cdata();
-		if ( is_pe64() )
-			return dos_header->get_nt_headers<true>()->optional_header.image_base;
-		else
-			return dos_header->get_nt_headers<false>()->optional_header.image_base;
+		return visit_nt( this, [ ] ( auto* nt ) -> uint64_t { return nt->optional_header.image_base; } );
+	}
+
+	size_t pe_image::get_image_size() const
+	{
+		// Get the image size from optional header.
+		//
+		return visit_nt( this, [ ] ( auto* nt ) -> size_t { return nt->optional_header.size_image; } );
+	}
+
+	bool pe_image::has_relocations() const
+	{
+		// Relocs must not be stripped and basereloc should exist.
+		//
+		return visit_nt( this, [ ] ( auto* nt ) -> bool
+		{ 
+			return !nt->file_header.characteristics.relocs_stripped &&
+				   nt->optional_header.data_directories.basereloc_directory.present();
+		} );
+	}
+
+	std::optional<uint64_t> pe_image::get_entry_point() const
+	{
+		// Get the entry point from optional header, return nullopt if zero.
+		//
+		if ( auto ep = visit_nt( this, [ ] ( auto* nt ) -> uint64_t { return nt->optional_header.entry_point; } ) )
+			return ep;
+		return std::nullopt;
 	}
 
 	bool pe_image::is_valid() const
@@ -631,7 +659,7 @@ namespace vtil
 		// Get image boundaries and the dos header.
 		//
 		const void* data = cdata();
-		const void* data_limit = ( char* ) cdata() + get_image_size();
+		const void* data_limit = ( char* ) cdata() + size();
 		auto dos_header = ( const dos_header_t* ) cdata();
 		
 		// Validate DOS header.
@@ -650,10 +678,15 @@ namespace vtil
 		if ( nt_header->signature != NT_HDR_MAGIC )
 			return false;
 
-		// Validat optional header magic.
+		// Validate optional header magic.
 		//
 		if ( nt_header->optional_header.magic != OPT_HDR32_MAGIC &&
 			 nt_header->optional_header.magic != OPT_HDR64_MAGIC )
+			return false;
+
+		// Make sure it is not managed code.
+		//
+		if ( visit_nt( this, [ ] ( auto* nt ) { return nt->optional_header.data_directories.com_descriptor_directory.present(); } ) )
 			return false;
 		
 		// TODO: Validate more data...
@@ -675,20 +708,12 @@ namespace vtil
 
 		// Add the byte count into NT headers.
 		//
-		if ( is_pe64() )
+		visit_nt( this, [ & ] ( auto* nt )
 		{
-			auto& opt_header = ( ( dos_header_t* ) this->data() )->get_nt_headers<true>()->optional_header;
-			opt_header.size_code += math::narrow_cast<uint32_t>( aligned_size );
-			opt_header.size_image += math::narrow_cast<uint32_t>( aligned_size );
-			opt_header.size_headers += ( uint32_t ) sizeof( section_header_t );
-		}
-		else
-		{
-			auto& opt_header = ( ( dos_header_t* ) this->data() )->get_nt_headers<false>()->optional_header;
-			opt_header.size_code += math::narrow_cast<uint32_t>( aligned_size );
-			opt_header.size_image += math::narrow_cast<uint32_t>( aligned_size );
-			opt_header.size_headers += ( uint32_t ) sizeof( section_header_t );
-		}
+			nt->optional_header.size_code +=    math::narrow_cast<uint32_t>( aligned_size );
+			nt->optional_header.size_image +=   math::narrow_cast<uint32_t>( aligned_size );
+			nt->optional_header.size_headers += math::narrow_cast<uint32_t>( sizeof( section_header_t ) );
+		} );
 
 		// Append a section and write the characteristics.
 		//
@@ -710,11 +735,7 @@ namespace vtil
 	{
 		// Get relocation directory.
 		//
-		auto dos_header = ( const dos_header_t* ) cdata();
-		const auto& reloc_dir = is_pe64()
-			? dos_header->get_nt_headers<true>()->optional_header.data_directories.basereloc_directory
-			: dos_header->get_nt_headers<false>()->optional_header.data_directories.basereloc_directory;
-		if ( reloc_dir.present() )
+		if ( auto& reloc_dir = visit_nt( this, []( auto* nt ) -> auto& { return nt->optional_header.data_directories.basereloc_directory; } ); reloc_dir.present() )
 		{
 			// Get block boundaries
 			//
